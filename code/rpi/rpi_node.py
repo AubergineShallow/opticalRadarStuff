@@ -14,7 +14,7 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
 from common.config import load as load_config
 from common.constants import UDP_PORT, TARGET_FPS, PROTOCOL_VERSION
-from common.protocol import TelemetryPacket, MotionVector as ProtocolMotionVector
+from common.protocol import TelemetryPacket, MotionVector as ProtocolMotionVector, AnnouncePacket
 
 from .vision import VisionSystem, VisionConfig
 from .gps import GPSReader
@@ -82,6 +82,7 @@ class RPiNode:
         self._running = False
         self._sequence = 0
         self._frame_count = 0
+        self._last_announce_time = 0.0
     
     def start(self) -> bool:
         """
@@ -117,6 +118,12 @@ class RPiNode:
         signal.signal(signal.SIGTERM, self._signal_handler)
         
         print(f"Node started, sending to {self.server_address}:{self.server_port}")
+        
+        # Send initial burst of announcements
+        for _ in range(3):
+            self._send_announce()
+            time.sleep(0.1)
+            
         return True
     
     def stop(self) -> None:
@@ -154,6 +161,29 @@ class RPiNode:
             flags |= 0x04
         
         return flags
+        
+    def _send_announce(self) -> bool:
+        """Send announce packet with configuration."""
+        if not self._socket:
+            return False
+            
+        try:
+            packet = AnnouncePacket(
+                camera_id=self.camera_id,
+                timestamp=time.time(),
+                fov_horizontal=self.vision.config.horizontal_fov,
+                fov_vertical=self.vision.config.vertical_fov,
+                resolution_width=self.vision.config.resolution[0],
+                resolution_height=self.vision.config.resolution[1],
+                fps=self.vision.config.fps
+            )
+            
+            data = packet.pack()
+            self._socket.sendto(data, (self.server_address, self.server_port))
+            return True
+        except Exception as e:
+            print(f"Announce failed: {e}")
+            return False
     
     def process_frame(self) -> bool:
         """
@@ -239,6 +269,11 @@ class RPiNode:
         
         while self._running:
             frame_start = time.time()
+            
+            # Periodic announcement (every 5 seconds)
+            if time.time() - self._last_announce_time > 5.0:
+                self._send_announce()
+                self._last_announce_time = time.time()
             
             self.process_frame()
             

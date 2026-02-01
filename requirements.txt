@@ -9,6 +9,7 @@ PyYAML>=5.4
 # Server dependencies
 scipy>=1.7.0          # For Hungarian algorithm in data association
 matplotlib>=3.4.0     # For visualization (optional if running headless)
+websockets>=10.0      # For broadcasting state to Frontend UI
 
 # Raspberry Pi node dependencies (only needed on RPi)
 # pyserial>=3.5       # For GPS UART communication

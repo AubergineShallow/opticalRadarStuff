@@ -14,14 +14,14 @@ import sys
 import os
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from common.protocol import TelemetryPacket, HEADER_SIZE, SIGNATURE_SIZE
+from common.protocol import TelemetryPacket, HEADER_SIZE, SIGNATURE_SIZE, PACKET_TYPE_ANNOUNCE, AnnouncePacket
 from common.constants import UDP_PORT, MAX_PACKET_SIZE
 
 
 @dataclass
 class ReceivedPacket:
     """Received packet with metadata."""
-    packet: TelemetryPacket
+    packet: object  # TelemetryPacket or AnnouncePacket
     sender_ip: str
     sender_port: int
     receive_time: float
@@ -137,7 +137,16 @@ class UDPServer:
         else:
             # No authentication, just parse
             try:
-                packet = TelemetryPacket.unpack(data)
+                # Peek at packet type (Byte 1)
+                # Header starts with Version (B) + Type (B)
+                if len(data) >= 2:
+                    pkt_type = data[1]
+                    if pkt_type == PACKET_TYPE_ANNOUNCE:
+                        packet = AnnouncePacket.unpack(data)
+                    else:
+                        packet = TelemetryPacket.unpack(data)
+                else:
+                    return None
             except Exception:
                 return None
         

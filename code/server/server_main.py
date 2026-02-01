@@ -19,7 +19,7 @@ if _parent_dir not in sys.path:
     sys.path.insert(0, _parent_dir)
 
 from common.config import load as load_config, Config
-from common.protocol import TelemetryPacket, PACKET_TYPE_TELEMETRY, PACKET_TYPE_GROUND_TRUTH
+from common.protocol import TelemetryPacket, PACKET_TYPE_TELEMETRY, PACKET_TYPE_GROUND_TRUTH, PACKET_TYPE_ANNOUNCE, AnnouncePacket
 
 # Use try/except for both module and direct execution support
 try:
@@ -35,7 +35,9 @@ try:
         METRIC_PACKETS_PROCESSED, METRIC_ACTIVE_TRACKS, METRIC_VOXEL_UPDATE_TIME
     )
     from .security import Authenticator
+    from .security import Authenticator
     from .validation import CalibrationValidator, GroundTruthValidator
+    from .websocket_server import WebSocketBroadcaster
 except ImportError:
     # Direct execution fallback
     from server.udp_server import UDPServer
@@ -51,6 +53,7 @@ except ImportError:
     )
     from server.security import Authenticator
     from server.validation import CalibrationValidator, GroundTruthValidator
+    from server.websocket_server import WebSocketBroadcaster
 
 
 class OpticalRadarServer:
@@ -161,6 +164,14 @@ class OpticalRadarServer:
             offline_timeout_sec=30.0,
             alert_callback=self._on_health_change
         )
+
+        # WebSocket Server
+        try:
+            self.ws_server = WebSocketBroadcaster(port=5000)
+            self.logger.info("system", "WebSocket server initialized")
+        except Exception as e:
+            self.logger.error("system", f"Failed to init WebSocket: {e}")
+            self.ws_server = None
         
         # Visualizer
         self.visualizer = None
@@ -185,6 +196,10 @@ class OpticalRadarServer:
         # Start UDP server
         self.udp_server.start()
         
+        # Start WebSocket server
+        if self.ws_server:
+            self.ws_server.start()
+        
         # Setup visualizer
         if self.visualizer:
             self.visualizer.setup()
@@ -203,6 +218,9 @@ class OpticalRadarServer:
         
         self._running = False
         self.udp_server.stop()
+        
+        if self.ws_server:
+            self.ws_server.stop()
         
         if self.visualizer:
             self.visualizer.close()
@@ -251,18 +269,94 @@ class OpticalRadarServer:
                 )
         
         # Update visualizer
+        # Update visualizer
         if self.visualizer:
             self._update_visualizer()
+            
+        # Broadcast state via WebSocket
+        if self.ws_server:
+            self._broadcast_state()
     
-    def _process_packet(self, packet: TelemetryPacket, receive_time: float) -> None:
+    def _broadcast_state(self) -> None:
+        """Broadcast system state to UI."""
+        # 1. System Status
+        self.ws_server.broadcast("SYSTEM_STATUS", {
+            "server_fps": 30.0,  # TODO: Calculate actual FPS
+            "total_tracks": len(self.tracker.get_confirmed_tracks()),
+            "total_voxels": 0,  
+            "uptime_seconds": 0,  # TODO: Add uptime
+            "cpu_percent": 0.0,
+            "memory_percent": 0.0
+        })
+        
+        # 2. Tracks (consolidated)
+        tracks = []
+        for track in self.tracker.get_confirmed_tracks():
+            tracks.append({
+                "track_id": track.track_id,  # Changed from id to track_id
+                "state": 1, # CONFIRMED
+                "position": [track.position[0], track.position[1], track.position[2]],
+                "velocity": [0,0,0],
+                "covariance": [],
+                "first_seen": track.first_seen,
+                "last_seen": track.last_seen,
+                "hit_count": track.hit_count,
+                "confidence": 0.8,
+                "predicted_next": [0,0,0]
+            })
+        self.ws_server.broadcast("TRACK_UPDATE", tracks)
+        
+        # 3. Nodes (with config)
+        nodes = []
+        for node_id, record in self.node_health.get_all_nodes().items():
+            # Map status string to integer
+            # HEALTHY=0, DEGRADED=1, UNHEALTHY=2, OFFLINE=3
+            status_val = 3
+            rec_status = record.get_status().value
+            if rec_status == "healthy": status_val = 0
+            elif rec_status == "degraded": status_val = 1
+            elif rec_status == "unhealthy": status_val = 2
+            elif rec_status == "offline": status_val = 3
+            
+            nodes.append({
+                "node_id": node_id,
+                "status": status_val,
+                "last_seen": record.last_packet_time,
+                "fps": record.packets_per_second,
+                "cpu_usage": 0.0,
+                "temp_c": 0.0,
+                "ip_address": "unknown",
+                "location": [0,0,0], # TODO: Link to ray_builder camera positions
+                # Extra config fields can be merged if frontend supports them
+                "config": record.sensor_config
+            })
+        self.ws_server.broadcast("NODE_UPDATE", nodes)
+
+    def _process_packet(self, packet: object, receive_time: float) -> None:
         """Process a single telemetry packet based on its type."""
         # Route based on packet type
         if packet.packet_type == PACKET_TYPE_GROUND_TRUTH:
             self._process_ground_truth_packet(packet)
             return
+            
+        if packet.packet_type == PACKET_TYPE_ANNOUNCE:
+            self._process_announce_packet(packet)
+            return
         
         # Default: process as telemetry
-        self._process_telemetry_packet(packet, receive_time)
+        if packet.packet_type == PACKET_TYPE_TELEMETRY:
+            self._process_telemetry_packet(packet, receive_time)
+
+    def _process_announce_packet(self, packet: AnnouncePacket) -> None:
+        """Process announce packet."""
+        config = {
+            "fov": packet.fov_horizontal,
+            "fov_v": packet.fov_vertical,
+            "resolution": [packet.resolution_width, packet.resolution_height],
+            "fps": packet.fps
+        }
+        self.node_health.update_node_config(packet.camera_id, config)
+        self.logger.info("network", f"Received announcement from {packet.camera_id}")
     
     def _process_ground_truth_packet(self, packet: TelemetryPacket) -> None:
         """Process ground truth packet for validation."""

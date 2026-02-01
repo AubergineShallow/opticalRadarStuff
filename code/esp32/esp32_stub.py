@@ -168,38 +168,84 @@ class ESP32Stub:
             return None
 
 
-# Placeholder for actual C++ code reference
-ESP32_CPP_TEMPLATE = """
-// ESP32 Arduino C++ implementation would look like:
-//
-// #include <WiFi.h>
-// #include <WiFiUdp.h>
-// #include "esp_camera.h"
-//
-// struct __attribute__((packed)) TelemetryPacket {
-//     uint8_t version;
-//     uint16_t node_id;
-//     uint32_t timestamp;
-//     uint32_t sequence;
-//     int16_t azimuth;      // Scaled: value / 32767 * 360 = degrees
-//     int16_t elevation;     // Centidegrees
-//     uint8_t intensity;
-//     uint8_t health;
-// };
-//
-// void sendTelemetry(float az, float el, uint8_t intensity) {
-//     TelemetryPacket pkt;
-//     pkt.version = 3;
-//     pkt.node_id = NODE_ID;
-//     pkt.timestamp = millis();
-//     pkt.sequence = sequence++;
-//     pkt.azimuth = (int16_t)((az / 360.0f) * 32767);
-//     pkt.elevation = (int16_t)(el * 100);
-//     pkt.intensity = intensity;
-//     pkt.health = getHealthFlags();
-//     
-//     udp.beginPacket(serverIP, serverPort);
-//     udp.write((uint8_t*)&pkt, sizeof(pkt));
-//     udp.endPacket();
-// }
-"""
+def main():
+    """Run the ESP32 stub as a standalone node."""
+    import argparse
+    from common.constants import UDP_PORT
+    from common.protocol import AnnouncePacket
+    
+    parser = argparse.ArgumentParser(description="ESP32 Stub Node")
+    parser.add_argument("--id", "-i", default="esp01", help="Node ID")
+    parser.add_argument("--server", "-s", default="127.0.0.1", help="Server address")
+    parser.add_argument("--port", "-p", type=int, default=UDP_PORT, help="Server port")
+    
+    args = parser.parse_args()
+    
+    config = ESP32Config(
+        node_id=args.id,
+        server_address=args.server,
+        server_port=args.port,
+        frame_rate=15
+    )
+    
+    stub = ESP32Stub(config)
+    print(f"Starting ESP32 Stub: {args.id}")
+    
+    if not stub.start():
+        print("Failed to start stub")
+        return
+        
+    print(f"Sending to {args.server}:{args.port}")
+    
+    # Constants for ESP32-CAM (OV2640)
+    FOV_H = 66.0
+    FOV_V = 50.0
+    RES_W = 800
+    RES_H = 600
+    
+    try:
+        last_announce = 0.0
+        while True:
+            now = time.time()
+            
+            # Announce every 5 seconds
+            if now - last_announce > 5.0:
+                # Manually construct packet
+                pkt = AnnouncePacket(
+                    camera_id=config.node_id,
+                    timestamp=now,
+                    fov_horizontal=FOV_H,
+                    fov_vertical=FOV_V,
+                    resolution_width=RES_W,
+                    resolution_height=RES_H,
+                    fps=config.frame_rate
+                )
+                
+                # We need to send this via the stub's socket
+                if stub._socket:
+                    try:
+                        stub._socket.sendto(pkt.pack(), (config.server_address, config.server_port))
+                        print(f"Sent ANNOUNCE from {args.id}")
+                    except Exception as e:
+                        print(f"Announce error: {e}")
+                
+                last_announce = now
+            
+            # Simulate detection
+            # 30% chance of detection
+            if int(now * 10) % 10 < 3:
+                az = (now * 20) % 360  # Rotating signal
+                el = 10.0
+                intensity = 200
+                stub.send_detection(az, el, intensity)
+            
+            time.sleep(1.0 / config.frame_rate)
+            
+    except KeyboardInterrupt:
+        print("Stopping...")
+    finally:
+        stub.stop()
+
+
+if __name__ == "__main__":
+    main()

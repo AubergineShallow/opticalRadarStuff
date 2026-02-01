@@ -12,10 +12,12 @@ import numpy as np
 from .constants import VERSION, MOTION_VECTOR_SIZE
 
 
+
 # Packet type identifiers
 PACKET_TYPE_TELEMETRY = 0x01
 PACKET_TYPE_COMMAND = 0x02
 PACKET_TYPE_GROUND_TRUTH = 0x03
+PACKET_TYPE_ANNOUNCE = 0x04
 
 # Header size: 60 bytes for V3
 HEADER_SIZE = 60
@@ -53,6 +55,77 @@ class MotionVector:
         elevation = (el_raw / 32767.0) * 90.0
         
         return cls(azimuth, elevation, intensity, class_id)
+
+
+@dataclass
+class AnnouncePacket:
+    """
+    Packet sent by node to announce capabilities.
+    Features: FOV, Resolution, FPS.
+    """
+    version: int = VERSION
+    packet_type: int = PACKET_TYPE_ANNOUNCE
+    camera_id: str = ""
+    timestamp: float = 0.0
+    
+    # Payload
+    fov_horizontal: float = 60.0
+    fov_vertical: float = 45.0
+    resolution_width: int = 640
+    resolution_height: int = 480
+    fps: int = 30
+    
+    def pack(self) -> bytes:
+        """Pack announce packet."""
+        # Camera ID: 8 bytes (null-padded)
+        cam_id_bytes = self.camera_id.encode('utf-8')[:8].ljust(8, b'\x00')
+        
+        # Header-like structure
+        data = struct.pack(
+            '>BB', self.version, self.packet_type
+        )
+        data += cam_id_bytes
+        data += struct.pack('>d', self.timestamp)
+        
+        # Payload: ffHHB (float, float, ushort, ushort, uchar)
+        # 4 + 4 + 2 + 2 + 1 = 13 bytes payload
+        data += struct.pack(
+            '>ffHHB',
+            self.fov_horizontal,
+            self.fov_vertical,
+            self.resolution_width,
+            self.resolution_height,
+            self.fps
+        )
+        
+        return data
+    
+    @classmethod
+    def unpack(cls, data: bytes) -> 'AnnouncePacket':
+        """Unpack announce packet."""
+        offset = 0
+        version, packet_type = struct.unpack_from('>BB', data, offset)
+        offset += 2
+        
+        camera_id = data[offset:offset+8].rstrip(b'\x00').decode('utf-8')
+        offset += 8
+        
+        timestamp, = struct.unpack_from('>d', data, offset)
+        offset += 8
+        
+        fov_h, fov_v, w, h, fps = struct.unpack_from('>ffHHB', data, offset)
+        
+        return cls(
+            version=version,
+            packet_type=packet_type,
+            camera_id=camera_id,
+            timestamp=timestamp,
+            fov_horizontal=fov_h,
+            fov_vertical=fov_v,
+            resolution_width=w,
+            resolution_height=h,
+            fps=fps
+        )
 
 
 @dataclass

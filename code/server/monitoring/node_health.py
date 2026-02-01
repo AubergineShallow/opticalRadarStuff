@@ -35,6 +35,9 @@ class NodeHealthRecord:
     offline_timeout_sec: float = 30.0
     degraded_pps_threshold: float = 15.0  # Below this = degraded
     
+    # Static Configuration (from Announce)
+    sensor_config: Optional[Dict] = None
+    
     def update(
         self,
         timestamp: float,
@@ -68,6 +71,10 @@ class NodeHealthRecord:
         self.last_sequence = sequence
         self.packet_count += 1
         self.health_flags = health_flags
+        
+    def update_config(self, config: Dict) -> None:
+        """Update static sensor configuration."""
+        self.sensor_config = config
     
     def get_status(self, current_time: Optional[float] = None) -> NodeStatus:
         """Determine current health status."""
@@ -130,6 +137,15 @@ class NodeHealthMonitor:
         self._alert_callback = alert_callback
         self._previous_status: Dict[str, NodeStatus] = {}
     
+    def update_node_config(self, node_id: str, config: Dict) -> None:
+        """Update configuration for a node."""
+        if node_id not in self._nodes:
+            self._nodes[node_id] = NodeHealthRecord(
+                node_id=node_id,
+                offline_timeout_sec=self.offline_timeout
+            )
+        self._nodes[node_id].update_config(config)
+
     def record_packet(
         self,
         node_id: str,
