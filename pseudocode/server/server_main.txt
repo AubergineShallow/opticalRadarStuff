@@ -1,0 +1,160 @@
+FILE: server_main.py (Server - Phase 1)
+PURPOSE: The main program that orchestrates Tracking, Monitoring, and Validation.
+EXECUTION: Run as module (python -m server.server_main) or use run_server.py launcher.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This "Boss" module has been upgraded. Instead of just showing raw dots (hot voxels),
+it now tracks objects, monitors camera health, and validates accuracy.
+
+--------------------------------------------------------------------------------
+COMPONENTS IT USES
+--------------------------------------------------------------------------------
+
+1. CORE: Voxel Grid, Ray Builder
+2. TRACKING: Tracker (Kalman Filter), Track Manager
+3. MONITORING: Node Health, Metrics, Logger
+4. SECURITY: Authenticator, Key Manager
+5. VALIDATION: Calibration Validator, Ground Truth
+
+--------------------------------------------------------------------------------
+STARTUP SEQUENCE
+--------------------------------------------------------------------------------
+
+1. SETUP CONFIG & LOGGING
+   - Load config.yaml
+   - Init structured logger (Info level)
+
+2. SETUP SECURITY
+   - Load Shared Secret Keys
+   - Init Authenticator
+
+3. SETUP SUBSYSTEMS
+   - create VoxelGrid(200m x 200m x 100m)
+   - create Tracker()
+   - create NodeHealthMonitor()
+   - create CalibrationValidator()
+   - create Calibrator(validator=CalibrationValidator)
+
+4. START NETWORKING
+   - Init UDPServer(port=5005, local_auth=authenticator)
+   - Server starts background thread
+
+5. START VISUALIZER
+   - Open 3D Window
+
+--------------------------------------------------------------------------------
+MAIN LOOP (runs forever)
+--------------------------------------------------------------------------------
+
+EVERY FRAME (e.g. 0.033s):
+
+  1. PROCESS INPUT
+     - Handle keyboard/mouse queries
+
+  2. VOXEL UPDATE
+     - grid.decay()  # Cool down old data
+     
+     - FOR EACH packet in udp_server.get_packets():
+         # Build rays from packet
+         rays = ray_builder.build_rays_from_packet(packet)
+         
+         # Add ALL rays to grid first
+         FOR ray in rays:
+             grid.add_ray(ray.origin, ray.direction, ray.intensity)
+         
+         # Get detections for tracking (clustered hot voxels)
+     
+     - detections = grid.get_detections()
+
+  3. TRACKING UPDATE (The Brain)
+     - result = tracker.update(detections)
+       # Note: Tracker handles predict() internally per-track
+     - active_tracks = tracker.get_confirmed_tracks()
+
+  4. CALIBRATION OBSERVATIONS 
+     # IMPORTANT FIX: Use CONFIRMED TRACKS, not hot voxels!
+     # This prevents circular self-validation where a camera
+     # calibrates against the voxel it just painted.
+     - IF active_tracks exist:
+         track_positions = [t.position for t in active_tracks]
+         FOR ray in recent_rays:
+             best_position = find_nearest_voxel_to_ray(ray, track_positions)
+             IF best_position within threshold:
+                 calibrator.add_observation(camera_id, ray.direction,
+                                           best_position, ray.origin)
+
+  5. CALIBRATION APPLY (Apply corrections to ray builder)
+     - cal_results = calibrator.process()
+     - FOR result in cal_results:
+         IF result.approved:
+             ray_builder.set_calibration_offset(result.camera_id, 
+                                               result.correction_quaternion)
+
+  6. MONITORING CHECK
+     - metrics.record("frame_time", dt)
+     # Note: Node health timeouts are checked implicitly when 
+     # visualizer requests node status
+     - if alert in node_health.alerts:
+         logger.warning(alert)
+
+  7. VALIDATION (Periodic)
+     - Every N frames:
+       - validator.check_consistency(active_tracks)
+       - if simulation_mode:
+           validator.compare_ground_truth(active_tracks, sim.ground_truth)
+
+  8. VISUALIZATION
+     - CLEAR screen
+     - DRAW active_tracks (with IDs and Velocity vectors)
+     - DRAW camera_status (Green/Red dots based on health)
+     - RENDER text overlay (FPS, Track Count, System Health)
+
+--------------------------------------------------------------------------------
+DATA FLOW ADAPTATION
+--------------------------------------------------------------------------------
+
+OLD WAY:
+  UDP -> RayBuilder -> VoxelGrid -> Visualizer
+
+NEW WAY:
+  UDP -> Authenticator (Verify) -> NodeHealth (Stats) -> RayBuilder -> 
+  VoxelGrid -> Tracker -> Calibrator (using confirmed tracks) -> Visualizer
+
+--------------------------------------------------------------------------------
+KEYBOARD CONTROLS
+--------------------------------------------------------------------------------
+'C' - Force Calibration update
+'D' - Toggle debug view (show raw voxels vs tracks)
+'R' - Reset tracker
+'S' - Toggle simulation/ground truth overlay
+
+--------------------------------------------------------------------------------
+HELPER FUNCTION: find_nearest_voxel_to_ray (_find_best_matching_voxel in code)
+--------------------------------------------------------------------------------
+PURPOSE: Associate a ray with the track position it most likely detected.
+
+ALGORITHM:
+  INPUT: ray_origin, ray_direction, list of candidate_positions (confirmed tracks)
+  
+  1. Calculate perpendicular distance from each position to the ray:
+     distance = ||(P - O) - ((P - O) · D) * D||
+     where P = position, O = ray origin, D = ray direction (normalized)
+  
+  2. Filter out positions behind the camera (projection < 0)
+  
+  3. Return the closest position if distance < threshold (e.g., 10m)
+     Otherwise return None
+
+WHY THIS MATTERS:
+  In multi-target scenarios, we need to avoid associating a ray from Camera A
+  pointing at Target 1 with a track at Target 2. This geometric matching
+  ensures each ray is calibrated against the object it actually detected.
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+The server is no longer just a "viewer". It is now a state estimator that
+filters noise, ensures security, and monitors its own health.

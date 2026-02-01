@@ -1,0 +1,263 @@
+FILE: key_manager.py
+PURPOSE: Manage shared secrets for authentication across the system.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This handles loading, storing, rotating, and distributing the secret keys
+used for packet authentication.
+
+Think of it as a "key ring" for the security system.
+
+--------------------------------------------------------------------------------
+KEY STORAGE
+--------------------------------------------------------------------------------
+
+LOCATIONS (priority order):
+  1. Environment variable: OPTICAL_RADAR_SECRET_KEY
+  2. File: /etc/optical_radar/secret.key
+  3. File: ./config/secret.key (development)
+
+FORMAT:
+  - Base64-encoded random bytes
+  - One key per line (supports multiple keys during rotation)
+  - Comments with # (e.g., "# Generated 2026-01-29")
+
+EXAMPLE FILE:
+```
+# Primary key (generated 2026-01-29)
+wXyZ1234base64encodedkey...
+
+# Backup key (will be removed 2026-02-05)
+# oldkey5678base64...
+```
+
+PERMISSIONS:
+  - File must be readable only by server user (chmod 0600)
+  - Reject if world-readable (security risk)
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. LOAD KEYS
+   PROCESS:
+     - Try environment variable first
+     - Fall back to file
+     - Decode from base64
+     - Validate key strength
+     - Check file permissions
+   OUTPUT: List of valid keys
+   
+   VALIDATION:
+     - Each key must be at least 32 bytes
+     - File permissions must be 0600 or stricter
+     - If validation fails, abort (don't run insecurely)
+
+2. GET PRIMARY KEY
+   OUTPUT: Most recent valid key (for signing)
+
+3. GET ALL VALID KEYS
+   OUTPUT: List of all keys (for verification)
+   
+   USE CASE:
+     - During key rotation, accept both old and new
+     - Server can verify packets signed with any valid key
+
+4. GENERATE NEW KEY
+   PROCESS:
+     - Generate 32+ bytes of cryptographic random data
+     - Encode as base64
+   OUTPUT: New key string
+   
+   ENTROPY SOURCE:
+     - Use os.urandom() or secrets module
+     - NOT random.random() (not cryptographically secure)
+
+5. SAVE KEY
+   INPUT: Key, file path
+   PROCESS:
+     - Write to file with secure permissions
+     - Set permissions to 0600 immediately
+     - Sync to disk (prevent corruption)
+   OUTPUT: Key saved securely
+
+6. ROTATE KEYS
+   INPUT: New key
+   PROCESS:
+     - Append new key to file (becomes primary)
+     - Mark old key with comment
+     - Schedule old key removal (grace period)
+   OUTPUT: Rotation metadata (old key, new key, expiry)
+
+7. CLEANUP OLD KEYS
+   INPUT: Grace period (default 7 days)
+   PROCESS:
+     - Remove keys older than grace period
+     - Keep only current primary key
+   OUTPUT: Updated key file
+
+8. DISTRIBUTE KEY
+   INPUT: Target node (camera), key
+   PROCESS:
+     - Copy key to remote node via SSH
+     - Set proper permissions
+     - Verify key is readable on remote
+   OUTPUT: Success or failure
+   
+   EXAMPLE:
+   ```
+   distribute_key("rpi@192.168.1.10", new_key)
+   # Executes:
+   # 1. SSH to node
+   # 2. Write key to /etc/optical_radar/secret.key
+   # 3. chmod 0600 /etc/optical_radar/secret.key
+   # 4. Verify file contents
+   ```
+
+9. VERIFY KEY SYNC
+   OUTPUT: List of nodes with matching key vs mismatched
+   
+   USE CASE:
+     - After rotation, verify all cameras updated
+     - Identify nodes that need manual intervention
+
+--------------------------------------------------------------------------------
+KEY ROTATION WORKFLOW
+--------------------------------------------------------------------------------
+
+PHASE 1: GENERATE NEW KEY
+  ```
+  new_key = key_manager.generate_new_key()
+  key_manager.save_key(new_key, "/etc/optical_radar/secret_new.key")
+  ```
+
+PHASE 2: DISTRIBUTE TO SERVER
+  ```
+  # Add new key to server (keep old key too)
+  key_manager.rotate_keys(new_key)
+  # Now server accepts both old and new keys
+  ```
+
+PHASE 3: DISTRIBUTE TO CAMERAS
+  ```
+  for camera_ip in all_cameras:
+      key_manager.distribute_key(f"pi@{camera_ip}", new_key)
+  ```
+
+PHASE 4: VERIFY DISTRIBUTION
+  ```
+  status = key_manager.verify_key_sync()
+  if all_cameras_updated(status):
+      print("All cameras updated successfully")
+  else:
+      print(f"Manual intervention needed for: {failed_cameras}")
+  ```
+
+PHASE 5: CLEANUP (after grace period)
+  ```
+  # Wait 7 days for stragglers
+  time.sleep(7 * 86400)
+  key_manager.cleanup_old_keys(grace_days=7)
+  # Now only new key is valid
+  ```
+
+--------------------------------------------------------------------------------
+AUTOMATED ROTATION SCHEDULE
+--------------------------------------------------------------------------------
+
+RECOMMENDED:
+  - Rotate keys every 90 days
+  - Use cron job or systemd timer
+
+EXAMPLE CRON:
+  ```
+  # Rotate keys every 90 days
+  0 2 1 */3 * /usr/local/bin/optical_radar_rotate_keys.sh
+  ```
+
+ROTATION SCRIPT:
+  ```bash
+  #!/bin/bash
+  # optical_radar_rotate_keys.sh
+  
+  # Generate new key
+  NEW_KEY=$(optical_radar keygen)
+  
+  # Add to server
+  optical_radar key rotate "$NEW_KEY"
+  
+  # Distribute to all cameras
+  optical_radar key distribute-all "$NEW_KEY"
+  
+  # Verify
+  optical_radar key verify-sync
+  
+  # Schedule cleanup in 7 days
+  echo "optical_radar key cleanup" | at now + 7 days
+  ```
+
+--------------------------------------------------------------------------------
+DISASTER RECOVERY
+--------------------------------------------------------------------------------
+
+KEY LOST/COMPROMISED:
+  1. Generate new key immediately
+  2. Manually update server
+  3. Manually update each camera (physical access or secure OOB)
+  4. Remove compromised key from all systems
+
+EMERGENCY DISABLE SECURITY:
+  - Edit config: security.enabled = false
+  - Restart server
+  - Fix key distribution issues
+  - Re-enable security
+  - Rotate keys after incident
+
+================================================================================
+SECURITY BEST PRACTICES
+================================================================================
+
+DO:
+  ✅ Use cryptographically secure random number generator
+  ✅ Store keys only in protected files (0600 permissions)
+  ✅ Rotate keys periodically
+  ✅ Use separate keys for dev/staging/production
+  ✅ Document key rotation procedures
+  ✅ Audit key access (who/when)
+
+DON'T:
+  ❌ Hard-code keys in source code
+  ❌ Commit keys to version control
+  ❌ Share keys via email/Slack
+  ❌ Use weak keys (e.g., "password123")
+  ❌ Reuse keys across environments
+  ❌ Run with world-readable key files
+
+================================================================================
+INTEGRATION WITH SYSTEM
+================================================================================
+
+STARTUP:
+  - key_manager.load_keys()
+  - Pass primary key to authenticator
+
+RUNTIME:
+  - Periodically check for key updates
+  - Hot-reload if key file changes (no restart needed)
+
+MONITORING:
+  - Alert if key file permissions wrong
+  - Alert if key rotation overdue
+  - Track failed authentication attempts per key
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Centralized key management reduces errors
+- Secure key rotation prevents long-term key compromise
+- Automated distribution scales to many cameras
+- Recovery procedures minimize downtime
+- Compliance with security standards

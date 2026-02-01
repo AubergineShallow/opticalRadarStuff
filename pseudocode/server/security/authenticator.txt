@@ -1,0 +1,227 @@
+FILE: authenticator.py
+PURPOSE: HMAC-based authentication for telemetry packets.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This prevents anyone from sending fake camera data to the server.
+Like a password check, but for network packets.
+
+Uses HMAC (Hash-based Message Authentication Code) - a cryptographic signature.
+
+--------------------------------------------------------------------------------
+HOW IT WORKS
+--------------------------------------------------------------------------------
+
+SHARED SECRET:
+  - All cameras and server share a secret key
+  - Key is never sent over the network
+  - Stored in secure file or environment variable
+
+SIGNING (Camera side):
+  1. Build the packet data
+  2. Calculate HMAC of the data using secret key
+  3. Append signature to packet
+  4. Send packet + signature
+
+VERIFICATION (Server side):
+  1. Receive packet + signature
+  2. Calculate expected HMAC of packet data
+  3. Compare expected vs received signature
+  4. If match: packet is authentic
+  5. If mismatch: packet is rejected (possible attack)
+
+--------------------------------------------------------------------------------
+PROTOCOL CHANGES
+--------------------------------------------------------------------------------
+
+OLD PACKET FORMAT (Version 2):
+  [Header (50 bytes)][Motion Vectors (6N bytes)]
+
+NEW PACKET FORMAT (Version 3 with security):
+  [Header (50 bytes)][Motion Vectors (6N bytes)][Signature (32 bytes)]
+
+SIGNATURE FIELD:
+  - 32 bytes (256-bit HMAC-SHA256)
+  - Calculated over entire packet (header + vectors)
+  - Includes timestamp to prevent replay attacks
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. LOAD KEY
+   INPUT: Path to key file or environment variable
+   PROCESS:
+     - Read shared secret
+     - Validate key is strong enough (min 32 bytes recommended)
+   OUTPUT: Key loaded and ready
+   
+   SECURITY:
+     - Key file should have restricted permissions (0600)
+     - Never log or print the key
+     - Rotate keys periodically
+
+2. SIGN PACKET
+   INPUT: Packet bytes
+   PROCESS:
+     - Create HMAC using SHA256 algorithm
+     - Input: packet bytes + shared secret
+     - Output: 32-byte signature
+   OUTPUT: Signature bytes
+   
+   ALGORITHM:
+     signature = HMAC-SHA256(key, packet_data)
+
+3. VERIFY PACKET
+   INPUT: Packet bytes, claimed signature
+   PROCESS:
+     - Calculate expected signature
+     - Compare using constant-time comparison (prevents timing attacks)
+   OUTPUT: True if valid, False if invalid
+   
+   SECURITY:
+     - Use constant-time comparison (not ==)
+     - Log failed verifications (possible attack)
+     - Rate-limit repeated failures from same IP
+
+4. SIGN TELEMETRY PACKET (High-level)
+   INPUT: TelemetryPacket object
+   PROCESS:
+     - Serialize to bytes
+     - Calculate signature
+     - Append signature
+     - Return complete packet
+   OUTPUT: Signed packet ready to send
+
+5. VERIFY TELEMETRY PACKET (High-level)
+   INPUT: Raw packet bytes
+   PROCESS:
+     - Split into data + signature
+     - Verify signature
+     - If valid, deserialize data
+     - If invalid, raise AuthenticationError
+   OUTPUT: Validated TelemetryPacket object or error
+
+6. GENERATE KEY
+   PROCESS:
+     - Create cryptographically random 32-byte key
+     - Encode as base64 for storage
+   OUTPUT: New shared secret
+   
+   USAGE: Initial setup, key rotation
+
+--------------------------------------------------------------------------------
+REPLAY ATTACK PREVENTION
+--------------------------------------------------------------------------------
+
+PROBLEM:
+  - Attacker captures valid packet
+  - Replays it later to inject fake data
+
+SOLUTION - Timestamp validation:
+  1. Camera includes timestamp in header
+  2. Timestamp is covered by HMAC signature
+  3. Server checks timestamp is recent (< 30 seconds old)
+  4. Server rejects packets with old timestamps
+
+IMPLEMENTATION:
+  - Already have timestamp in protocol
+  - Add server-side timestamp check
+  - Reject if: |packet_time - server_time| > max_drift
+
+--------------------------------------------------------------------------------
+KEY DISTRIBUTION
+--------------------------------------------------------------------------------
+
+INITIAL SETUP:
+  1. Generate shared secret on secure machine
+  2. Save to /etc/optical_radar/secret.key on server
+  3. Copy to each camera via secure channel (SSH, USB, etc.)
+  4. Set file permissions to 0600 (owner read/write only)
+
+KEY ROTATION:
+  1. Generate new key
+  2. Distribute to all nodes
+  3. Configure "valid keys" list (old + new)
+  4. Allow grace period (both keys work)
+  5. Remove old key after all nodes upgraded
+
+================================================================================
+EXAMPLE USAGE
+================================================================================
+
+CAMERA SIDE:
+```
+authenticator = Authenticator(key_file="/etc/optical_radar/secret.key")
+packet = build_telemetry_packet(...)
+signed_packet = authenticator.sign_telemetry_packet(packet)
+send_udp(signed_packet)
+```
+
+SERVER SIDE:
+```
+authenticator = Authenticator(key_file="/etc/optical_radar/secret.key")
+raw_data = receive_udp()
+try:
+    packet = authenticator.verify_telemetry_packet(raw_data)
+    # Packet is authentic, process it
+    process_packet(packet)
+except AuthenticationError:
+    # Invalid signature, possible attack
+    log.warning("security", "Authentication failed", ip=sender_ip)
+    # Reject packet
+```
+
+================================================================================
+PERFORMANCE CONSIDERATIONS
+================================================================================
+
+- HMAC-SHA256 is fast (~1 microsecond per packet)
+- Negligible impact on throughput
+- More CPU cost than no security, but worth it
+- Can use hardware crypto acceleration if available
+
+================================================================================
+SECURITY PROPERTIES
+================================================================================
+
+PROVIDES:
+  ✅ Authentication (proves packet came from valid camera)
+  ✅ Integrity (detects any tampering with packet)
+  ✅ Replay protection (via timestamp validation)
+
+DOES NOT PROVIDE:
+  ❌ Confidentiality (packets not encrypted, readable by eavesdropper)
+  ❌ Anonymity (attacker can see camera IDs)
+
+If confidentiality needed:
+  - Use TLS/DTLS for encryption
+  - Or add encryption layer (AES-GCM)
+  - Trade-off: more complexity, more CPU
+
+================================================================================
+THREAT MODEL
+================================================================================
+
+ATTACKS PREVENTED:
+  - Injecting fake detections
+  - Spoofing camera identity
+  - Tampering with telemetry data
+  - Replaying old packets
+
+ATTACKS NOT PREVENTED:
+  - Eavesdropping (seeing telemetry data)
+  - Denial of service (flooding server)
+  - Physical camera compromise (attacker has key)
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Critical for production deployments
+- Prevents adversarial injection attacks
+- Ensures data integrity
+- Meets security compliance requirements
+- Low overhead, high security value

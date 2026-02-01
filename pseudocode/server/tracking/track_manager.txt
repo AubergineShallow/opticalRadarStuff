@@ -1,0 +1,358 @@
+FILE: track_manager.py
+PURPOSE: Manage track lifecycle, IDs, and bookkeeping.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This handles all the administrative work for tracks: creating IDs, deleting
+old tracks, maintaining the track database, and providing query interfaces.
+
+Think of it as the "database administrator" for tracks.
+
+--------------------------------------------------------------------------------
+TRACK DATABASE STRUCTURE
+--------------------------------------------------------------------------------
+
+STORAGE:
+  - Dictionary: track_id → Track object
+  - Allows O(1) lookup by ID
+  - Efficient iteration over all tracks
+
+EXAMPLE:
+```
+{
+  1: Track(id=1, state=CONFIRMED, position=[50,75,100], ...),
+  2: Track(id=2, state=TENTATIVE, position=[30,80,95], ...),
+  5: Track(id=5, state=LOST, position=[45,70,105], ...)
+  # Note: IDs 3, 4 were deleted
+}
+```
+
+INDEX BY STATE:
+  - Fast lookup of tracks by state
+  - Separate lists for TENTATIVE, CONFIRMED, LOST
+  - Updated when state changes
+
+SPATIAL INDEX (Optional):
+  - Grid-based or KD-tree
+  - Fast spatial queries ("all tracks within region")
+  - Useful for large numbers of tracks
+
+--------------------------------------------------------------------------------
+TRACK ID MANAGEMENT
+--------------------------------------------------------------------------------
+
+ID ASSIGNMENT:
+  - Sequential counter (1, 2, 3, ...)
+  - Never reused (even after deletion)
+  - Ensures unique identity
+  - Wraps around after very large numbers (billions)
+
+ID PERSISTENCE:
+  - IDs can be logged for post-processing
+  - External systems can reference by ID
+  - Important for data export and analysis
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. CREATE TRACK
+   INPUT: Initial position, initial velocity (optional)
+   
+   PROCESS:
+     - Generate new unique ID
+     - Create Track object
+     - Initialize Kalman filter
+     - Set state to TENTATIVE
+     - Add to database
+     - Add to state index
+   
+   OUTPUT: New Track object with ID
+
+2. DELETE TRACK
+   INPUT: Track ID
+   
+   PROCESS:
+     - Remove from database
+     - Remove from state index
+     - Clean up resources
+     - Optionally log deletion event
+   
+   OUTPUT: None
+
+3. GET TRACK
+   INPUT: Track ID
+   OUTPUT: Track object or None if not found
+
+4. GET ALL TRACKS
+   OUTPUT: List of all tracks (generator to avoid copying)
+
+5. GET TRACKS BY STATE
+   INPUT: State (TENTATIVE, CONFIRMED, LOST)
+   OUTPUT: List of tracks in that state
+   
+   EFFICIENCY: O(1) using state index
+
+6. UPDATE TRACK STATE
+   INPUT: Track ID, new state
+   
+   PROCESS:
+     - Update track.state
+     - Move track between state indices
+     - Log state transition
+     - Trigger any state-specific logic
+   
+   EXAMPLE:
+   ```
+   track_manager.update_track_state(track_id=7, new_state=CONFIRMED)
+   # Logs: "Track 7: TENTATIVE → CONFIRMED"
+   ```
+
+7. CLEANUP DELETED TRACKS
+   PROCESS:
+     - Find all tracks in DELETED state
+     - Remove from database
+     - Free resources
+   
+   CALL FREQUENCY: Every frame or every N frames
+
+8. GET TRACKS IN REGION
+   INPUT: 3D bounding box (min_x, max_x, min_y, max_y, min_z, max_z)
+   OUTPUT: List of tracks within that region
+   
+   USE CASE:
+     - Visualize only nearby tracks
+     - Region-specific processing
+     - Handoff to regional server
+
+9. COUNT TRACKS
+   OUTPUT: Count by state
+   
+   EXAMPLE:
+   ```
+   {
+     "total": 15,
+     "tentative": 3,
+     "confirmed": 10,
+     "lost": 2,
+     "deleted": 0  # (already cleaned up)
+   }
+   ```
+
+10. GET TRACK STATISTICS
+    OUTPUT: Aggregate statistics across all tracks
+    
+    EXAMPLE:
+    ```
+    {
+      "avg_velocity": 8.5,  # m/s
+      "max_velocity": 25.0,
+      "avg_lifetime": 12.3,  # seconds
+      "longest_track": 145.6
+    }
+    ```
+
+11. EXPORT TRACKS
+    INPUT: Format (JSON, CSV, custom)
+    OUTPUT: Serialized track data
+    
+    USE CASE:
+      - Save to file for later analysis
+      - Send to external system
+      - Generate reports
+
+12. IMPORT TRACKS (for resuming)
+    INPUT: Serialized track data
+    PROCESS: Restore tracks from saved state
+    
+    USE CASE:
+      - Resume after server restart
+      - Load historical data for replay
+
+--------------------------------------------------------------------------------
+LIFECYCLE MANAGEMENT
+--------------------------------------------------------------------------------
+
+AUTOMATIC CLEANUP:
+  - Every frame, check for tracks to delete:
+    * DELETED state → remove immediately
+    * LOST for > max_age → transition to DELETED
+  
+  - Prevents memory leaks
+  - Keeps database size bounded
+
+AGE TRACKING:
+  - Each track has creation timestamp
+  - Calculate age = current_time - created_at
+  - Use for lifecycle decisions
+
+HIT/MISS TRACKING:
+  - Track.hits = total detections matched
+  - Track.misses = consecutive frames without match
+  - Reset misses to 0 on match
+
+STATE TRANSITIONS:
+  ```
+  TENTATIVE:
+    - If hits >= min_hits_to_confirm → CONFIRMED
+    - If misses > tolerance → DELETED
+  
+  CONFIRMED:
+    - If misses >= lost_threshold → LOST
+  
+  LOST:
+    - If matched again → CONFIRMED (recovery)
+    - If lost_time > max_age → DELETED
+  ```
+
+--------------------------------------------------------------------------------
+CONFIGURATION
+--------------------------------------------------------------------------------
+
+From config.tracking:
+
+MIN_HITS_TO_CONFIRM: 3
+  - Tentative → Confirmed threshold
+
+MAX_TRACK_AGE: 5.0 seconds
+  - Delete lost tracks older than this
+
+LOST_THRESHOLD: 30 frames
+  - Confirmed → Lost after this many misses
+
+TENTATIVE_TIMEOUT: 2.0 seconds
+  - Delete tentative tracks that don't confirm
+
+HISTORY_LENGTH: 100
+  - Keep this many historical positions per track
+
+--------------------------------------------------------------------------------
+INTEGRATION WITH TRACKER
+--------------------------------------------------------------------------------
+
+tracker.py uses track_manager.py as follows:
+
+```python
+class Tracker:
+    def __init__(self):
+        self.track_manager = TrackManager()
+    
+    def update(self, detections):
+        # Get active tracks for prediction
+        tracks = self.track_manager.get_tracks_by_state(CONFIRMED)
+        
+        # ... association logic ...
+        
+        # Create new tracks
+        for det in unmatched_detections:
+            track = self.track_manager.create_track(det.position)
+        
+        # Update track states
+        for track in tracks_to_confirm:
+            self.track_manager.update_track_state(track.id, CONFIRMED)
+        
+        # Cleanup
+        self.track_manager.cleanup_deleted_tracks()
+```
+
+--------------------------------------------------------------------------------
+PERSISTENCE (Optional)
+--------------------------------------------------------------------------------
+
+SAVE TO DISK:
+  - Periodically snapshot track database
+  - Save as JSON or binary
+  - Enables restart without losing tracks
+
+RECOVERY:
+  - On startup, load previous snapshot
+  - Resume tracking from last state
+  - Useful for server maintenance
+
+EXAMPLE:
+```python
+# Every 60 seconds
+track_manager.save_to_file("tracks_snapshot.json")
+
+# On startup
+if os.path.exists("tracks_snapshot.json"):
+    track_manager.load_from_file("tracks_snapshot.json")
+```
+
+--------------------------------------------------------------------------------
+MONITORING INTEGRATION
+--------------------------------------------------------------------------------
+
+METRICS:
+  - Track count by state
+  - Track creation rate
+  - Track deletion rate
+  - Average track lifetime
+
+LOGS:
+  - Track created: ID, position
+  - Track confirmed: ID, hits
+  - Track lost: ID, reason
+  - Track deleted: ID, lifetime
+
+EXAMPLE:
+```python
+def create_track(self, position):
+    track = Track(id=self.next_id, position=position)
+    self.tracks[track.id] = track
+    
+    # Monitoring
+    metrics.increment("tracks_created_total")
+    logger.info("track_manager", "Track created",
+                track_id=track.id, position=position)
+    
+    return track
+```
+
+================================================================================
+EXAMPLE: FULL LIFECYCLE
+================================================================================
+
+```
+T=0.0s:  Detection at (50, 75, 100)
+         → create_track(pos) → Track#1 TENTATIVE
+
+T=0.033: Detection at (50.8, 75, 100)
+         → match to Track#1 → hits=2
+
+T=0.066: Detection at (51.6, 75, 100)
+         → match to Track#1 → hits=3
+         → hits >= 3 → update_track_state(#1, CONFIRMED)
+
+T=0.1-2.0: Continuous detections
+           → Track#1 active, velocity estimated
+
+T=2.0s:  No detection (occluded)
+         → misses=1
+
+T=2.5s:  Still no detection
+         → misses=15 (0.5s at 30 FPS)
+
+T=3.0s:  Still no detection
+         → misses=30 → update_track_state(#1, LOST)
+
+T=7.5s:  Still lost
+         → lost_time = 5.5s > max_age
+         → update_track_state(#1, DELETED)
+
+T=7.6s:  cleanup_deleted_tracks()
+         → delete_track(#1) → removed from database
+```
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Centralizes all track management logic
+- Enforces lifecycle rules consistently
+- Provides clean interface for tracker
+- Enables monitoring and debugging
+- Handles resource cleanup
+- Foundation for more advanced features (persistence, multi-threading)

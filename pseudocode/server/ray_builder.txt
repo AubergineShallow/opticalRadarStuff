@@ -1,0 +1,69 @@
+FILE: ray_builder.py
+PURPOSE: Convert camera reports into 3D lines pointing into the sky.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+When a camera says "I see something at 45° right and 30° up", this file
+converts that into a line that starts at the camera and goes into the sky.
+
+--------------------------------------------------------------------------------
+THE PROCESS
+--------------------------------------------------------------------------------
+
+INPUT (from camera):
+  - Camera GPS location (latitude, longitude, altitude)
+  - Camera rotation (which way it's pointing)
+  - List of things it saw (direction angles)
+
+OUTPUT:
+  - List of 3D lines, each with:
+    - Starting point (where the camera is)
+    - Direction (which way the line goes)
+
+--------------------------------------------------------------------------------
+STEP BY STEP
+--------------------------------------------------------------------------------
+
+1. FIND CAMERA POSITION
+   - Take GPS coordinates
+   - Convert to local meters (East, North, Up from home base)
+   - Now we know where the camera is in 3D space
+
+2. GET CAMERA ROTATION
+   - Take the rotation numbers from the camera
+   - Convert to a rotation grid (3x3 matrix)
+   - This tells us how to transform directions
+
+3. FOR EACH THING THE CAMERA SAW:
+   
+   a. CONVERT ANGLES TO DIRECTION
+      - Take the left/right angle and up/down angle
+      - Calculate a unit direction (like an arrow pointing that way)
+      - This is in "camera space" (relative to camera)
+   
+   b. TRANSFORM TO WORLD SPACE
+      - Apply the camera rotation
+      - Now the direction is in "world space" (relative to ground)
+   
+   c. CREATE A RAY
+      - Start point = camera position
+      - Direction = transformed direction
+      
+      * NEW: Apply Calibration Offset *
+      - If this camera has a calibration correction (from Calibrator)
+      - Rotate the direction by the correction quaternion
+      
+      - Add to the list
+
+4. RETURN ALL RAYS
+   - These rays can now be fed into the voxel grid
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Camera angles alone aren't useful (need 3D lines)
+- The voxel grid needs lines to find where objects are
+- Proper transformation accounts for camera tilt/rotation

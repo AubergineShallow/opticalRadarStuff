@@ -1,0 +1,62 @@
+FILE: process_image.cpp
+PURPOSE: High-speed ray tracing for the voxel grid (written in C++).
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This file does the same job as the Python voxel grid, but much faster.
+It's written in C++ (a faster programming language) and runs 10-100x
+faster than the Python version.
+
+--------------------------------------------------------------------------------
+WHY C++ INSTEAD OF PYTHON
+--------------------------------------------------------------------------------
+
+- Python is slow for math-heavy loops
+- The voxel grid does millions of calculations per second
+- C++ is compiled and optimized for speed
+- With many cameras, Python can't keep up
+
+--------------------------------------------------------------------------------
+THE ALGORITHM (Ray Marching)
+--------------------------------------------------------------------------------
+
+FOR EACH RAY (line from camera):
+  1. Start at the camera's position
+  2. Move a small step along the ray direction (0.5 meters)
+  3. Check if current position is inside the grid
+  4. If inside, find which box you're in
+  5. Add heat to that box
+  6. Repeat steps 2-5 until you've gone 150 meters
+  7. Move to next ray
+
+OPTIMIZATION:
+  - Uses "thread local" storage to avoid memory allocation
+  - Pre-calculates grid boundaries
+  - Skips boxes outside the grid quickly
+
+--------------------------------------------------------------------------------
+HOW IT CONNECTS TO PYTHON
+--------------------------------------------------------------------------------
+
+- Uses "pybind11" library to create a Python module
+- Python code calls: process_image_cpp.accumulate_distributed_rays(...)
+- Behind the scenes, the fast C++ code runs
+- Results go back to Python
+
+--------------------------------------------------------------------------------
+IF C++ ISN'T AVAILABLE
+--------------------------------------------------------------------------------
+
+- The Python voxel_grid.py has a fallback
+- It works the same way, just slower
+- System still functions, just at lower performance
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Enables real-time operation with many cameras
+- The bottleneck of the entire system
+- Without this, processing would fall behind incoming data

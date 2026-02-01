@@ -1,0 +1,101 @@
+FILE: main.cpp (ESP32)
+PURPOSE: Firmware for cheap ESP32 camera modules.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This runs on tiny, low-cost ESP32 camera boards. It's similar to the
+Raspberry Pi node but for smaller, cheaper hardware.
+
+--------------------------------------------------------------------------------
+THE HARDWARE
+--------------------------------------------------------------------------------
+
+- ESP32-CAM: A $5-10 camera board
+- Built-in WiFi for network connection
+- Built-in camera for capturing images
+- Optional: IMU (tilt sensor) and GPS
+
+--------------------------------------------------------------------------------
+STARTUP SEQUENCE
+--------------------------------------------------------------------------------
+
+1. CONFIGURE CAMERA
+   - Set resolution (640x480)
+   - Set frame rate
+   - Initialize the camera chip
+
+2. CONFIGURE WIFI
+   - Connect to the specified network
+   - Get an IP address
+   - Set up UDP socket for sending data
+
+3. CONFIGURE SENSORS (if present)
+   - Initialize IMU on I2C bus
+   - Initialize GPS on serial port
+
+4. CREATE PACKET BUFFER
+   - Allocate memory for outgoing messages
+   - Uses "static" allocation (safer on small devices)
+
+--------------------------------------------------------------------------------
+MAIN LOOP (runs forever)
+--------------------------------------------------------------------------------
+
+1. CHECK WIFI
+   - If disconnected, try to reconnect
+   - Don't proceed until connected
+
+2. CAPTURE FRAME
+   - Get one image from the camera
+
+3. DETECT MOTION
+   - Compare to previous frame
+   - Find areas that changed significantly
+   - Group changed pixels into blobs
+
+4. READ SENSORS
+   - Get tilt from IMU
+   - Get position from GPS
+
+5. BUILD PACKET
+   - Format version 2 (matching Python protocol)
+   - Pack 64-bit GPS (double precision)
+   - Pack orientation as quaternion
+   - Pack list of motion vectors
+
+6. SEND PACKET
+   - Transmit via UDP to server
+
+7. RELEASE FRAME
+   - Free the camera buffer for next capture
+
+--------------------------------------------------------------------------------
+KEY DIFFERENCES FROM RASPBERRY PI
+--------------------------------------------------------------------------------
+
+- Less memory (must be careful with buffers)
+- Slower processor (simpler algorithms needed)
+- Lower resolution camera
+- Less accurate motion detection
+- But: Much cheaper and lower power
+
+================================================================================
+PROTOCOL V3 COMPLIANCE (Phase 1 Update)
+================================================================================
+
+- Uses same binary format as Python
+- 64-bit latitude/longitude (high precision)
+- 6-byte motion vectors
+- 60-byte header (includes sequence number + flags)
+- Optional: HMAC signature (32 bytes) if security enabled
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Enables large-scale deployments at low cost
+- Can run on battery power
+- Many cameras = better coverage
+- Trade-off: Lower accuracy per camera, but more cameras

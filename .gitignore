@@ -1,0 +1,28 @@
+# Legacy UI
+NEW-UI/
+ui/
+
+# Dependencies
+node_modules/
+__pycache__/
+*.pyc
+
+# Environment & Config
+.env
+.env.local
+
+# Build Artifacts
+dist/
+build/
+*.zip
+*.log
+
+# Editor
+.vscode/
+.idea/
+
+# Temp
+temp/
+tmp/
+codes_dump.txt
+backend_codes_dump.txt

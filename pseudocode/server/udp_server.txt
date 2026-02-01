@@ -1,0 +1,53 @@
+FILE: udp_server.py (Phase 1)
+PURPOSE: Securely receive packets and update node stats.
+
+================================================================================
+WHAT THIS FILE DOES
+================================================================================
+The "Mailroom" now has a Security Guard and a Clerk.
+1. Security Guard: Checks signatures (Authenticator).
+2. Clerk: Logs stats like packet loss and jitter (NodeHealth).
+
+--------------------------------------------------------------------------------
+FUNCTIONS
+--------------------------------------------------------------------------------
+
+1. INITIALIZATION
+   - Bind Port 5005
+   - Require: Authenticator object
+   - Require: NodeHealthMonitor object
+
+2. PACKET HANDLER (Callback)
+   INPUT: Raw Bytes, IP Address
+
+   STEP A: SECURITY CHECK
+     - header, body, signature = split(packet)
+     - if NOT authenticator.verify(header+body, signature):
+         logger.warning("Auth Missing", ip=IP)
+         RETURN (Drop packet)
+     
+     - packet_obj = decoder.decode(header+body)
+     - if packet_obj.timestamp too old:
+         logger.warning("Replay Attempt", ip=IP)
+         RETURN (Drop packet)
+
+   STEP B: QUEUE PACKET
+     - Place verified packet in processing queue
+     - Main loop will pick it up later
+
+   (Note: Health updates and Ray processing happen in the Main Loop,
+    not in this receiving thread, to keep networking fast.)
+
+--------------------------------------------------------------------------------
+ERROR HANDLING
+--------------------------------------------------------------------------------
+
+- MALFORMED PACKET: Log error, update "Bad Packets" metric.
+- UNKNOWN CAMERA: Register new node ID in Health Monitor automatically (or reject if strict mode).
+- DUPLICATE PACKET: Sequence number check in Health Monitor handles this.
+
+================================================================================
+IMPACT
+================================================================================
+- Prevents spoofed data from entering the Voxel Grid.
+- Provides real-time stats on which cameras are struggling (high packet loss).

@@ -1,0 +1,180 @@
+FILE: node_health.py
+PURPOSE: Track the health and connectivity of all camera nodes.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This module monitors all cameras to detect failures, measure performance,
+and alert when cameras go offline or degrade.
+
+Think of it like a "vital signs monitor" for all cameras.
+
+--------------------------------------------------------------------------------
+WHAT IT TRACKS PER CAMERA
+--------------------------------------------------------------------------------
+
+CONNECTIVITY:
+  - Last message received timestamp
+  - Total messages received
+  - Messages per second (current rate)
+  - Time since last message (staleness)
+
+PACKET STATS:
+  - Sequence numbers received
+  - Detected packet losses (gaps in sequence)
+  - Out-of-order packets
+  - Packet loss percentage
+
+SENSOR HEALTH:
+  - GPS fix quality (from GPS status in packet)
+  - IMU status (calibrated vs uncalibrated)
+  - Camera frame rate (detections per second)
+
+CALIBRATION STATUS:
+  - Current calibration offset magnitude
+  - Calibration convergence trend (improving/degrading)
+  - Time since last calibration update
+
+PERFORMANCE:
+  - Detection count per frame (too many = overload)
+  - Latency (packet timestamp vs server receive time)
+
+--------------------------------------------------------------------------------
+HEALTH STATES
+--------------------------------------------------------------------------------
+
+HEALTHY: 
+  - Receiving packets regularly
+  - Packet loss < 5%
+  - Sensors functioning
+  - Green status
+
+DEGRADED:
+  - Packet loss 5-20%
+  - Or latency > 100ms
+  - Or sensor warnings
+  - Yellow status
+
+FAILING:
+  - Packet loss > 20%
+  - Or no GPS fix
+  - Or excessive latency
+  - Orange status
+
+OFFLINE:
+  - No messages for > timeout period (default 2 seconds)
+  - Red status
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. REGISTER NODE
+   INPUT: Node ID (like "RPI1")
+   PROCESS:
+     - Create health record for this node
+     - Initialize counters to zero
+     - Set state to UNKNOWN
+   OUTPUT: Node registered and tracked
+
+2. UPDATE FROM PACKET
+   INPUT: Node ID, packet (with timestamp, sequence number)
+   PROCESS:
+     - Record receipt timestamp
+     - Update message counters
+     - Check sequence number for gaps
+     - Calculate packet rate
+     - Update staleness timer
+     - Evaluate health state
+   OUTPUT: Updated health record
+
+3. GET NODE HEALTH
+   INPUT: Node ID
+   OUTPUT: Health state, stats, warnings
+
+4. GET ALL NODES
+   OUTPUT: List of all registered nodes with health status
+
+   OUTPUT: List of all registered nodes with health status
+
+5. CHECK STATUS CHANGE (Internal)
+   PROCESS:
+     - Called whenever a packet is received
+     - Compares new status vs old status
+     - Triggers alert_callback if changed
+   
+   NOTE: Offline detection happens lazily when status is requested,
+   or during packet receipt.
+
+6. CALCULATE AGGREGATE STATS
+   OUTPUT:
+     - Total cameras online
+     - Total cameras offline
+     - Average packet loss across all cameras
+     - Aggregate messages per second
+
+7. GENERATE HEALTH REPORT
+   OUTPUT: Human-readable status of all cameras
+   
+   Example:
+   ```
+   Camera Health Report
+   ====================
+   Total Cameras: 15
+   Online: 13 | Degraded: 2 | Offline: 0
+   
+   DEGRADED CAMERAS:
+   - RPI3: 12% packet loss
+   - RPI7: No GPS fix
+   
+   AGGREGATE STATS:
+   - Total msg/sec: 450
+   - Avg packet loss: 3.2%
+   ```
+
+--------------------------------------------------------------------------------
+ALERT SYSTEM
+--------------------------------------------------------------------------------
+
+ALERT TRIGGERS:
+  - State change (HEALTHY → DEGRADED → FAILING → OFFLINE)
+  - Packet loss spike (sudden increase)
+  - Sensor failure detected
+  - Camera coming back online after being offline
+
+ALERT FORMAT:
+  - Timestamp
+  - Node ID
+  - Alert type (STATE_CHANGE, PACKET_LOSS, SENSOR_FAILURE)
+  - Severity (INFO, WARNING, ERROR, CRITICAL)
+  - Message
+
+ALERT DELIVERY:
+  - Log to monitoring system
+  - Display in visualizer
+  - Optional: Send to external alerting (email, Slack, etc.)
+
+================================================================================
+INTEGRATION WITH SYSTEM
+================================================================================
+
+Called from:
+  - udp_server.py when packet received (update stats)
+  - server_main.py in main loop (detect failures, check health)
+  - visualizer.py to display camera status
+
+Data flows to:
+  - metrics.py for historical tracking
+  - logger.py for event logging
+  - Calibration system (deweight unhealthy cameras)
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Operators know immediately when cameras fail
+- Can identify network issues vs hardware issues
+- Prevents using bad data for calibration or tracking
+- Enables automated responses (e.g., restart camera)
+- Critical for production deployments

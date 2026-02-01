@@ -1,0 +1,90 @@
+FILE: vision.py
+PURPOSE: Detect moving objects in the camera video.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This file watches the camera video and finds things that are moving.
+It's like your eye noticing when something flies past.
+
+--------------------------------------------------------------------------------
+HOW MOTION DETECTION WORKS
+--------------------------------------------------------------------------------
+
+1. BACKGROUND MODEL
+   - The system learns what the "normal" scene looks like
+   - It builds a model of the static background
+   - Anything different from the background = motion
+
+2. FOREGROUND EXTRACTION
+   - Compare each new frame to the background
+   - Pixels that are different = foreground (moving things)
+   - Result: A black and white mask (white = motion, black = static)
+
+3. CLEANUP
+   - Remove noise (tiny random changes)
+   - Fill small holes in detected regions
+   
+4. FIND BLOBS
+   - Group connected white pixels into shapes
+   - Each shape = one moving object
+   - Calculate the center and size of each shape
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. SETUP
+   - Open the camera (640 x 480 resolution, 30 frames per second)
+   - Create a background subtractor (MOG2 algorithm)
+   - Create a cleanup tool (morphological kernel)
+
+2. READ FRAME
+   - Capture one image from the camera
+   - Return the image, or None if camera failed
+
+3. DETECT MOTION
+   INPUT: One camera frame
+   PROCESS:
+     - Convert to grayscale (color not needed)
+     - Apply background subtraction (get motion mask)
+     - Clean up the mask (remove noise)
+     - Find contours (outlines of moving things)
+     
+     FOR EACH CONTOUR:
+       - Calculate area (how big)
+       - If too small, ignore (probably noise)
+       - Find the bounding box (rectangle around it)
+       - Calculate center point
+       - Convert pixel position to angles:
+         * How far left/right from center = azimuth
+         * How far up/down from center = elevation
+       - Create a MotionVector with:
+         * Azimuth angle
+         * Elevation angle
+         * Intensity (based on area)
+         * Class ID (0 = unknown)
+       - Stop after 100 objects (prevent overload)
+   
+   OUTPUT: List of MotionVectors
+
+4. RELEASE
+   - Close the camera connection
+
+================================================================================
+CAMERA FIELD OF VIEW
+================================================================================
+
+- Horizontal: 60 degrees wide
+- Vertical: 45 degrees tall
+- Pixel at the edge = furthest angle
+- Pixel in center = 0 degrees
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- This is the "eyes" of the system
+- Finds objects before anything else can happen
+- Must be fast (runs 30 times per second)

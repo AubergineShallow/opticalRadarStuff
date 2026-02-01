@@ -1,0 +1,86 @@
+FILE: sim_node.py
+PURPOSE: A fake camera for testing the system without real hardware.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+Instead of using a real camera, this creates pretend data. You tell it
+where the camera is and where the "targets" are, and it sends reports
+to the server as if it were a real camera.
+
+--------------------------------------------------------------------------------
+WHY USE A SIMULATOR
+--------------------------------------------------------------------------------
+
+- No need to buy and set up real cameras
+- Can test with perfect, known target positions
+- Can verify the system detects objects correctly
+- Much faster to develop and debug
+
+--------------------------------------------------------------------------------
+TARGET MOTION TYPES
+--------------------------------------------------------------------------------
+
+1. STATIC
+   - Target doesn't move
+   - Stays in one place forever
+
+2. LINEAR
+   - Target moves in a straight line
+   - You set the speed (meters per second)
+   - Example: Moving East at 5 m/s
+
+3. ORBIT
+   - Target circles around a point
+   - You set the radius and speed
+   - Example: Circling at 30m radius
+
+--------------------------------------------------------------------------------
+HOW TO USE (Examples)
+--------------------------------------------------------------------------------
+
+SINGLE TARGET (old way):
+  python sim_node.py --id SIM1 --lat 37.77 --lon -122.42 --motion linear
+
+MULTIPLE TARGETS (new way):
+  python sim_node.py --id SIM1 --lat 37.77 --lon -122.42 \
+    --target "0,0,50,linear,5,0,0" \
+    --target "-30,30,60,orbit" \
+    --target "40,-20,40,static"
+
+Target format: "x,y,z,motion,vx,vy,vz"
+  - x,y,z = Starting position (meters from reference)
+  - motion = static, linear, or orbit
+  - vx,vy,vz = Velocity (for linear motion)
+
+--------------------------------------------------------------------------------
+MAIN LOOP
+--------------------------------------------------------------------------------
+
+EVERY 0.033 SECONDS (30 times per second):
+  1. Calculate current time since start
+  
+  2. FOR EACH TARGET:
+     - Calculate current position (based on motion type)
+     - Calculate look angles from camera to target
+     - Create a MotionVector
+  
+  3. BUILD PACKET
+     - Combine all vectors into one packet
+     - Include fake GPS and orientation
+  
+  4. SEND TO SERVER
+     - Just like a real camera would
+
+  5. PRINT STATUS
+     - Every second, show target positions
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Essential for development and testing
+- Verifies the math is correct
+- Multi-target support tests complex scenarios
+- Ground truth is known, so accuracy can be measured

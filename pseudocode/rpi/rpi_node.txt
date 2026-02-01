@@ -1,0 +1,62 @@
+FILE: node.py (RPi - Phase 1)
+PURPOSE: Smart Camera Node with Security and Version 3 Protocol.
+
+================================================================================
+WHAT THIS FILE DOES
+================================================================================
+The Camera Code now signs its messages and counts them to ensure none are lost.
+It also monitors its own sensor health.
+
+--------------------------------------------------------------------------------
+STATE VARIABLES
+--------------------------------------------------------------------------------
+- SEQUENCE_NUMBER: uint32 (Starts at 0, increments every packet)
+- SHARED_KEY: bytes (Loaded from secure file)
+- HEALTH_FLAGS: bitmask (GPS_LOCK, IMU_OK, CAM_OK)
+
+--------------------------------------------------------------------------------
+MAIN LOOP
+--------------------------------------------------------------------------------
+
+FOREVER:
+  1. HEALTH CHECK
+     - Check GPS signal/fix
+     - Check Camera framerate
+     - Update HEALTH_FLAGS
+
+  2. ACQUIRE DATA
+     - Image -> Vision Model -> Vectors
+     - GPS -> Lat/Lon
+     - IMU -> Quaternion
+
+  3. BUILD PACKET (V3)
+     - Increment SEQUENCE_NUMBER
+     - Header: [Ver=3, ID, Time, SeqNum, Loc, Orient, Flags]
+     - Body: [Vectors]
+
+  4. SECURITY SIGNING
+     - signature = HMAC(SHARED_KEY, Header + Body)
+     - packet = Header + Body + signature
+
+  5. TRANSMIT
+     - Send packet via UDP to Server
+     - (Optional) Log if send fails
+
+  6. PROCESS COMMANDS
+     - Check incoming socket non-blocking
+     - If CALIBRATION_CMD received:
+       - Verify Server Signature
+       - If valid: Update internal calibration offset
+
+--------------------------------------------------------------------------------
+CONFIGURATION
+--------------------------------------------------------------------------------
+- Loaded from 'config.yaml' or Env Vars
+- Needs: SERVER_IP, SERVER_PORT, NODE_ID, SECRET_KEY_FILE
+
+================================================================================
+IMPACT
+================================================================================
+- Secure: Authenticates itself to server.
+- Robust: Sequence numbers let server detect network issues.
+- Smart: Reports its own health status flags.

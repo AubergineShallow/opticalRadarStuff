@@ -1,0 +1,31 @@
+FILE: constants.py
+PURPOSE: Stores fixed settings for the system.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This file holds important numbers and settings that the whole system uses.
+Think of it like a settings page.
+
+SETTINGS:
+
+1. SERVER ADDRESS
+   - Use any available network connection (0.0.0.0)
+   - Listen on door number 5005
+
+2. MESSAGE SIZE LIMIT
+   - Maximum message size is 512 bytes
+   - This ensures messages can travel across the internet safely
+
+3. VERSION NUMBER
+   - Current version is 3
+   - All parts of the system must use the same version
+
+================================================================================
+WHY IT MATTERS
+================================================================================
+
+- All parts of the system read these same values
+- If you change a setting here, the whole system changes
+- Keeps everything consistent

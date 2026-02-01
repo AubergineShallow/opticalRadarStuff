@@ -1,0 +1,316 @@
+FILE: kalman_filter.py
+PURPOSE: State estimation filter for tracking moving objects.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+A Kalman filter predicts where an object will be, then corrects the prediction
+when new measurements arrive. It's like "smart averaging" that accounts for
+motion and uncertainty.
+
+Think of it as: "I think the plane is here, moving this fast, but I'm not
+100% certain. When I get a new detection, I'll update my estimate."
+
+--------------------------------------------------------------------------------
+THE KALMAN FILTER CONCEPT
+--------------------------------------------------------------------------------
+
+STATE VECTOR (what we track):
+  - Position: X, Y, Z (meters)
+  - Velocity: vX, vY, vZ (meters/second)
+  - Total: 6 values
+
+UNCERTAINTY:
+  - How confident are we in each value?
+  - Stored as covariance matrix (6x6)
+  - Large values = high uncertainty
+  - Small values = high confidence
+
+TWO STEPS:
+  1. PREDICT: Use physics to estimate future state
+     - "Object was at X with velocity V, so now it should be at X + V*dt"
+  
+  2. UPDATE: Correct prediction with new measurement
+     - "I predicted (50, 75, 100) but detected (51, 74, 100)"
+     - "Split the difference based on confidence"
+     - Result: (50.7, 74.3, 100) with reduced uncertainty
+
+--------------------------------------------------------------------------------
+STATE REPRESENTATION
+--------------------------------------------------------------------------------
+
+STATE VECTOR (6x1):
+```
+x = [X, Y, Z, vX, vY, vZ]ᵀ
+
+Example:
+x = [50.0,   # X position
+     75.0,   # Y position
+     100.0,  # Z position
+     5.0,    # X velocity
+     0.0,    # Y velocity
+     0.5]    # Z velocity (slowly ascending)
+```
+
+COVARIANCE MATRIX (6x6):
+```
+P = [[σ²x,  ..., ...],
+     [...,  σ²y, ...],
+     [...,  ..., σ²z],
+     [...,  ..., ...],
+     [...,  ..., ...],
+     [...,  ..., σ²vz]]
+
+Diagonal values = variance (uncertainty squared)
+Off-diagonal = correlations between variables
+```
+
+--------------------------------------------------------------------------------
+MOTION MODEL (Constant Velocity)
+--------------------------------------------------------------------------------
+
+ASSUMPTION:
+  - Objects move at constant velocity
+  - Position changes linearly with time
+  - Velocity stays the same (unless measurement updates it)
+
+STATE TRANSITION:
+```
+# Predict state at time k+1 from state at time k
+x(k+1) = F * x(k)
+
+Where F is the state transition matrix:
+F = [[1, 0, 0, dt, 0,  0 ],    # x_new = x_old + vx*dt
+     [0, 1, 0, 0,  dt, 0 ],    # y_new = y_old + vy*dt
+     [0, 0, 1, 0,  0,  dt],    # z_new = z_old + vz*dt
+     [0, 0, 0, 1,  0,  0 ],    # vx stays same
+     [0, 0, 0, 0,  1,  0 ],    # vy stays same
+     [0, 0, 0, 0,  0,  1 ]]    # vz stays same
+
+dt = time step (e.g., 0.033 seconds for 30 FPS)
+```
+
+PROCESS NOISE:
+  - Reality: velocity doesn't stay perfectly constant
+  - Objects maneuver, accelerate, turn
+  - Add noise to account for this (Q matrix)
+  - Larger Q = expect more maneuvering
+
+--------------------------------------------------------------------------------
+MEASUREMENT MODEL
+--------------------------------------------------------------------------------
+
+WHAT WE MEASURE:
+  - Only position (X, Y, Z)
+  - Not velocity (inferred from position changes)
+
+MEASUREMENT MATRIX:
+```
+# Extract position from state
+z = H * x
+
+Where H is:
+H = [[1, 0, 0, 0, 0, 0],    # Measure X
+     [0, 1, 0, 0, 0, 0],    # Measure Y
+     [0, 0, 1, 0, 0, 0]]    # Measure Z
+
+Result: z = [X, Y, Z]ᵀ
+```
+
+MEASUREMENT NOISE:
+  - Detections aren't perfect
+  - Voxel resolution, camera errors
+  - Add noise to account for this (R matrix)
+  - Larger R = trust measurements less
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. INITIALIZE
+   INPUT: Initial position, initial velocity (optional)
+   
+   PROCESS:
+     - Set state vector: x = [pos_x, pos_y, pos_z, vel_x, vel_y, vel_z]
+     - Set initial covariance: high uncertainty if velocity unknown
+     - Configure process noise Q
+     - Configure measurement noise R
+   
+   OUTPUT: Kalman filter ready to use
+   
+   EXAMPLE:
+   ```
+   kf = KalmanFilter(
+       initial_position=[50.0, 75.0, 100.0],
+       initial_velocity=[5.0, 0.0, 0.0],  # if known
+       position_uncertainty=2.0,  # meters
+       velocity_uncertainty=5.0   # m/s
+   )
+   ```
+
+2. PREDICT
+   INPUT: Time step (dt)
+   
+   PROCESS:
+     - Apply motion model: x_pred = F * x
+     - Update covariance: P_pred = F * P * Fᵀ + Q
+     - Uncertainty increases (less confident over time)
+   
+   OUTPUT: Predicted state and covariance
+   
+   INTUITION:
+     - "It's been 0.033 seconds"
+     - "Object was at (50, 75, 100) moving at (5, 0, 0)"
+     - "So now it should be at (50.165, 75, 100)"
+     - "But I'm less certain than before"
+
+3. UPDATE
+   INPUT: Measurement (detected position)
+   
+   PROCESS:
+     - Calculate innovation: y = z_measured - H*x_predicted
+     - Calculate Kalman gain: K = P * Hᵀ * (H*P*Hᵀ + R)⁻¹
+     - Update state: x = x_predicted + K * y
+     - Update covariance: P = (I - K*H) * P
+     - Uncertainty decreases (more confident with measurement)
+   
+   OUTPUT: Updated state and covariance
+   
+   INTUITION:
+     - "I predicted (50.5, 75.0, 100.0)"
+     - "But I measured (51.0, 74.5, 100.0)"
+     - "Kalman gain tells me how much to trust each"
+     - "If prediction is uncertain, trust measurement more"
+     - "If measurement is noisy, trust prediction more"
+     - Result: optimal blend
+
+4. GET STATE
+   OUTPUT: Current state estimate
+   
+   RETURNS:
+   ```
+   {
+     "position": [50.0, 75.0, 100.0],
+     "velocity": [5.0, 0.0, 0.5],
+     "position_uncertainty": [1.2, 1.3, 1.1],  # std dev per axis
+     "velocity_uncertainty": [0.5, 0.6, 0.4]
+   }
+   ```
+
+5. GET COVARIANCE
+   OUTPUT: Full 6x6 covariance matrix
+   
+   USE CASE:
+     - For advanced analysis
+     - Understanding correlations
+     - Propagating uncertainty
+
+6. PREDICT AHEAD
+   INPUT: Time into future (seconds)
+   OUTPUT: Predicted future state
+   
+   PROCESS:
+     - Apply motion model N times
+     - Uncertainty grows with time
+   
+   EXAMPLE:
+   ```
+   future_state = kf.predict_ahead(time=1.0)
+   # Where will object be in 1 second?
+   ```
+
+--------------------------------------------------------------------------------
+PARAMETER TUNING
+--------------------------------------------------------------------------------
+
+PROCESS NOISE (Q):
+  - How much objects maneuver
+  - Small Q: assume constant velocity (smooth tracks, slow to adapt)
+  - Large Q: expect maneuvering (responsive, but jittery)
+  
+  TYPICAL VALUES:
+  - Slow objects (clouds): Q_position = 0.1, Q_velocity = 0.01
+  - Fast objects (aircraft): Q_position = 1.0, Q_velocity = 0.5
+
+MEASUREMENT NOISE (R):
+  - Detection accuracy
+  - Related to voxel resolution
+  
+  TYPICAL VALUES:
+  - 1m voxel resolution: R = 1.0 to 2.0 meters variance
+
+INITIAL UNCERTAINTY:
+  - First detection has no velocity info
+  - High velocity uncertainty initially
+  
+  TYPICAL VALUES:
+  - Position: 5.0 meters
+  - Velocity: 10.0 m/s
+
+--------------------------------------------------------------------------------
+EXAMPLE USAGE
+--------------------------------------------------------------------------------
+
+TRACK LIFECYCLE:
+```python
+# Frame 1: First detection
+kf = KalmanFilter(initial_position=[50, 75, 100])
+
+# Frame 2 (0.033s later): Predict where it should be
+kf.predict(dt=0.033)
+predicted_pos = kf.get_state()["position"]  # [50.0, 75.0, 100.0] (no velocity yet)
+
+# Frame 2: New detection arrives
+kf.update(measurement=[50.8, 75.1, 100.0])
+# Now filter infers velocity: ~24 m/s in X direction
+
+# Frame 3: Predict and update
+kf.predict(dt=0.033)
+# Predicts based on inferred velocity
+kf.update(measurement=[51.6, 75.2, 100.0])
+# Confirms velocity estimate
+
+# Frame 10: Lost detection (occluded)
+for i in range(7):
+    kf.predict(dt=0.033)
+    # No update, uncertainty grows
+    # But prediction continues based on last known velocity
+
+# Frame 11: Detection returns
+kf.update(measurement=[56.5, 75.8, 100.0])
+# Corrects any drift, reduces uncertainty
+```
+
+================================================================================
+ADVANTAGES OF KALMAN FILTER
+================================================================================
+
+OVER RAW DETECTIONS:
+  ✅ Smooths noise (less jitter)
+  ✅ Fills in gaps (predictions during occlusion)
+  ✅ Estimates velocity (from position changes)
+  ✅ Quantifies uncertainty
+  ✅ Optimal in statistical sense (for linear systems)
+
+LIMITATIONS:
+  ⚠️ Assumes linear motion (constant velocity)
+  ⚠️ Struggles with sharp turns
+  ⚠️ Needs tuning (Q, R parameters)
+  ⚠️ Not ideal for highly maneuvering targets
+
+FOR HIGHLY MANEUVERING TARGETS:
+  - Use Extended Kalman Filter (EKF)
+  - Or Unscented Kalman Filter (UKF)
+  - Or Particle Filter
+  - Trade-off: more computation
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Core algorithm for object tracking
+- Provides smooth, continuous state estimates
+- Handles measurement noise and gaps
+- Foundation for prediction and trajectory planning
+- Well-understood, proven technology (used in GPS, aerospace, robotics)

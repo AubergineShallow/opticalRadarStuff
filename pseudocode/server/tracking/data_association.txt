@@ -1,0 +1,307 @@
+FILE: data_association.py
+PURPOSE: Match detections to existing tracks (the "correspondence problem").
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+When you have N tracks and M detections, which detection belongs to which track?
+This is the data association problem - the heart of multi-object tracking.
+
+Example:
+  - Frame K: Track#1 at (50,75,100), Track#2 at (30,80,95)
+  - Frame K+1: Detect at (51,75,100) and (31,79,95)
+  - Question: Which detection matches which track?
+  - Answer: (51,75,100)→Track#1, (31,79,95)→Track#2
+
+--------------------------------------------------------------------------------
+THE ASSIGNMENT PROBLEM
+--------------------------------------------------------------------------------
+
+GOAL: Find optimal one-to-one matching between tracks and detections
+
+CONSTRAINTS:
+  - One detection can match at most one track
+  - One track can match at most one detection
+  - Matching based on distance/cost
+
+OUTCOME:
+  - Matched pairs: (track, detection)
+  - Unmatched tracks: tracks with no detection
+  - Unmatched detections: detections with no track (new objects)
+
+--------------------------------------------------------------------------------
+ALGORITHM: HUNGARIAN ALGORITHM
+--------------------------------------------------------------------------------
+
+Also known as Munkres algorithm - finds optimal assignment.
+
+STEPS:
+  1. Build cost matrix
+     - Rows = existing tracks
+     - Columns = new detections
+     - Cell [i,j] = cost of assigning detection j to track i
+  
+  2. Apply Hungarian algorithm
+     - Finds minimum-cost assignment
+     - Guarantees optimal solution
+  
+  3. Filter by threshold
+     - Reject assignments with cost > max threshold
+     - These are unmatched
+
+COST METRIC:
+  - Most common: Euclidean distance
+  - Alternative: Mahalanobis distance (accounts for uncertainty)
+  - Alternative: IoU (Intersection over Union) for bounding boxes
+
+--------------------------------------------------------------------------------
+EXAMPLE: 2 TRACKS, 3 DETECTIONS
+--------------------------------------------------------------------------------
+
+TRACKS:
+  - Track#1 predicted at (50, 75, 100)
+  - Track#2 predicted at (30, 80, 95)
+
+DETECTIONS:
+  - Detection A at (51, 75, 100)
+  - Detection B at (31, 79, 95)
+  - Detection C at (45, 70, 105)
+
+COST MATRIX (Euclidean distance):
+```
+           Det A   Det B   Det C
+Track#1    1.0m    24.7m   7.1m
+Track#2    25.0m   1.4m    17.7m
+```
+
+HUNGARIAN ALGORITHM RESULT:
+  - Track#1 ← Detection A (cost 1.0m)
+  - Track#2 ← Detection B (cost 1.4m)
+  - Detection C is unmatched (new object?)
+
+APPLY THRESHOLD (max_distance = 5.0m):
+  - Track#1 ← Detection A: ✅ (1.0m < 5.0m) MATCH
+  - Track#2 ← Detection B: ✅ (1.4m < 5.0m) MATCH
+  - Detection C: unmatched (create new track)
+
+--------------------------------------------------------------------------------
+MAHALANOBIS DISTANCE (Advanced)
+--------------------------------------------------------------------------------
+
+PROBLEM WITH EUCLIDEAN DISTANCE:
+  - Treats all directions equally
+  - Doesn't account for track uncertainty
+  - Doesn't account for velocity direction
+
+MAHALANOBIS DISTANCE:
+  - Accounts for covariance (uncertainty ellipse)
+  - If track is uncertain in X, allow more deviation in X
+  - If object moving fast in X, expect change in X
+
+FORMULA:
+```
+d = sqrt((z - z_pred)ᵀ * S⁻¹ * (z - z_pred))
+
+Where:
+  z = measured position
+  z_pred = predicted position
+  S = innovation covariance (from Kalman filter)
+```
+
+BENEFIT:
+  - More robust matching
+  - Especially good for tracks with different uncertainties
+  - Standard in advanced tracking systems
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. ASSOCIATE
+   INPUT: 
+     - List of tracks (with predicted positions)
+     - List of detections (measured positions)
+     - Max distance threshold
+   
+   PROCESS:
+     a. Build cost matrix
+        - For each (track, detection) pair:
+          - Calculate distance
+          - Store in matrix
+     
+     b. Apply Hungarian algorithm
+        - Find optimal assignment
+     
+     c. Filter by threshold
+        - Keep only matches within max_distance
+     
+     d. Categorize results
+        - Matched pairs
+        - Unmatched tracks
+        - Unmatched detections
+   
+   OUTPUT:
+     ```
+     {
+       "matches": [(track_1, detection_0), (track_2, detection_1)],
+       "unmatched_tracks": [track_3, track_4],
+       "unmatched_detections": [detection_2]
+     }
+     ```
+
+2. CALCULATE COST MATRIX (Euclidean)
+   INPUT: Track predictions, detections
+   OUTPUT: NxM cost matrix
+   
+   IMPLEMENTATION:
+   ```
+   for each track i:
+       for each detection j:
+           cost[i,j] = euclidean_distance(
+               track[i].predicted_position,
+               detection[j].position
+           )
+   ```
+
+3. CALCULATE COST MATRIX (Mahalanobis)
+   INPUT: Track predictions with covariances, detections
+   OUTPUT: NxM cost matrix
+   
+   IMPLEMENTATION:
+   ```
+   for each track i:
+       for each detection j:
+           innovation = detection[j] - track[i].predicted_position
+           S = track[i].innovation_covariance
+           cost[i,j] = sqrt(innovation.T @ inv(S) @ innovation)
+   ```
+
+4. SOLVE ASSIGNMENT
+   INPUT: Cost matrix, threshold
+   OUTPUT: List of (row, column) assignments
+   
+   USES: scipy.optimize.linear_sum_assignment or custom implementation
+
+5. GREEDY ASSOCIATION (Simpler alternative)
+   PROCESS:
+     - Sort all (track, detection) pairs by distance
+     - Greedily assign closest pairs first
+     - Skip if track or detection already assigned
+     - Continue until all processed
+   
+   PROS: Fast, simple
+   CONS: Not optimal (Hungarian is better)
+   
+   USE CASE: When speed matters more than optimality
+
+--------------------------------------------------------------------------------
+EDGE CASES
+--------------------------------------------------------------------------------
+
+NO DETECTIONS:
+  - All tracks are unmatched
+  - Increment miss counters
+
+NO TRACKS:
+  - All detections create new tracks
+  - Common at system startup
+
+MORE DETECTIONS THAN TRACKS:
+  - Some detections will be unmatched
+  - Create new tentative tracks
+
+MORE TRACKS THAN DETECTIONS:
+  - Some tracks will be unmatched
+  - Increment miss counters, potentially mark as LOST
+
+AMBIGUOUS MATCHES:
+  - Two tracks very close to one detection
+  - Hungarian algorithm picks best global assignment
+  - May not match both tracks (one goes unmatched)
+
+--------------------------------------------------------------------------------
+CONFIGURATION
+--------------------------------------------------------------------------------
+
+MAX_DISTANCE_FOR_ASSOCIATION:
+  - From config.tracking.max_distance_for_association
+  - Typical: 5.0 meters
+  - Too large: false associations (wrong track matched)
+  - Too small: track breaks (real match rejected)
+  - Should be ~2-3x detection noise
+
+DISTANCE METRIC:
+  - EUCLIDEAN: Simple, fast
+  - MAHALANOBIS: Better performance, more complex
+  - Choose based on requirements
+
+ALGORITHM:
+  - HUNGARIAN: Optimal, slower (O(n³))
+  - GREEDY: Fast, suboptimal (O(n² log n))
+  - Choose based on number of tracks/detections
+
+--------------------------------------------------------------------------------
+PERFORMANCE CONSIDERATIONS
+--------------------------------------------------------------------------------
+
+COMPLEXITY:
+  - Hungarian: O(n³) where n = max(tracks, detections)
+  - Typical: 10-100 tracks → <1ms per frame
+  - If thousands of detections, use spatial indexing
+
+OPTIMIZATION:
+  - Pre-filter by distance (don't compute costs for far pairs)
+  - Use sparse matrix if many impossible matches
+  - Cache distance calculations if reused
+
+SPATIAL INDEXING:
+  - If many detections, use KD-tree or grid
+  - Find only nearby detections for each track
+  - Reduces cost matrix to sparse representation
+
+================================================================================
+EXAMPLE USAGE
+================================================================================
+
+```python
+# In tracker.py update() method:
+
+# Step 1: Predict all tracks
+for track in tracks:
+    track.filter.predict(dt=0.033)
+
+# Step 2: Associate detections to tracks
+association_result = data_association.associate(
+    tracks=tracks,
+    detections=current_detections,
+    max_distance=config.max_distance_for_association
+)
+
+# Step 3: Update matched tracks
+for track, detection in association_result["matches"]:
+    track.filter.update(detection.position)
+    track.last_update = current_time
+    track.hits += 1
+
+# Step 4: Create new tracks from unmatched detections
+for detection in association_result["unmatched_detections"]:
+    new_track = Track(initial_position=detection.position)
+    tracks.append(new_track)
+
+# Step 5: Handle unmatched tracks
+for track in association_result["unmatched_tracks"]:
+    track.misses += 1
+    if track.misses > threshold:
+        track.state = LOST
+```
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Core problem in multi-object tracking
+- Wrong association → tracks swap identities or break
+- Optimal algorithm ensures best possible matching
+- Threshold tuning balances false positives vs track stability
+- Foundation for track continuity and identity management

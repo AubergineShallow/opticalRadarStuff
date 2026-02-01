@@ -1,0 +1,519 @@
+================================================================================
+IMPLEMENTATION CONVENTIONS & SEMANTICS
+================================================================================
+PURPOSE: Authoritative reference for consistent data formats across all modules
+AUDIENCE: Developers/AI agents implementing the pseudocode
+
+⚠️ CRITICAL: All modules MUST follow these conventions exactly.
+   Inconsistencies will cause system failures.
+
+================================================================================
+1. COORDINATE SYSTEMS & ORIENTATION
+================================================================================
+
+GEODETIC COORDINATES (GPS):
+  - Format: WGS84 datum
+  - Latitude: Decimal degrees, positive = North, negative = South
+  - Longitude: Decimal degrees, positive = East, negative = West
+  - Altitude: Meters above WGS84 ellipsoid (NOT above sea level)
+  - Example: lat=37.7749, lon=-122.4194, alt=50.0
+  - Range: lat ∈ [-90, 90], lon ∈ [-180, 180], alt ∈ [-1000, 10000]
+
+LOCAL COORDINATES (ENU - East-North-Up):
+  - Origin: Defined by reference GPS coordinate (set in config)
+  - X-axis: Positive = East, negative = West (meters)
+  - Y-axis: Positive = North, negative = South (meters)
+  - Z-axis: Positive = Up, negative = Down (meters)
+  - Right-handed coordinate system
+  - Units: ALWAYS meters
+  - Example: [50.0, 75.0, 100.0] = 50m East, 75m North, 100m Up
+
+ECEF COORDINATES (Earth-Centered, Earth-Fixed):
+  - Used internally for GPS conversions only
+  - X-axis: Points to 0°N, 0°E
+  - Y-axis: Points to 0°N, 90°E
+  - Z-axis: Points to North Pole
+  - Units: meters from Earth center
+
+ANGULAR MEASUREMENTS:
+  - Azimuth (horizontal angle):
+    * Measured from TRUE NORTH (not magnetic north)
+    * Clockwise positive: North=0°, East=90°, South=180°, West=270°
+    * Range: [0, 360) degrees
+    * Wrap-around: 359° + 2° = 1°
+  
+  - Elevation (vertical angle):
+    * Measured from horizontal plane
+    * Positive = above horizon, negative = below horizon
+    * Range: [-90, 90] degrees
+    * 0° = horizontal, +90° = straight up, -90° = straight down
+  
+  - Pitch (camera tilt forward/back):
+    * Positive = tilting up (nose up)
+    * Negative = tilting down (nose down)
+    * Range: [-90, 90] degrees
+  
+  - Roll (camera tilt left/right):
+    * Positive = tilting right (right wing down)
+    * Negative = tilting left (left wing down)
+    * Range: [-180, 180] degrees
+  
+  - Yaw (camera rotation around vertical):
+    * Same as azimuth: 0° = North, 90° = East
+    * Range: [0, 360) degrees
+
+QUATERNION ORIENTATION:
+  - Format: [w, x, y, z] (scalar-first convention)
+  - w = cos(θ/2), [x,y,z] = sin(θ/2) * axis
+  - Normalized: w² + x² + y² + z² = 1
+  - Identity (no rotation): [1, 0, 0, 0]
+  - Multiplication order: q_result = q2 * q1 (rotate by q1 then q2)
+
+ROTATION MATRICES:
+  - 3x3 matrices, row-major storage
+  - Right-handed rotations
+  - Active rotations (rotate vectors, not coordinate frames)
+
+================================================================================
+2. TIME & TIMESTAMPS
+================================================================================
+
+PRIMARY TIME FORMAT:
+  - Unix timestamp (seconds since 1970-01-01 00:00:00 UTC)
+  - Type: float64 (double precision)
+  - Precision: Microseconds (6 decimal places minimum)
+  - Example: 1738123445.123456
+  - NO timezone conversions - always UTC
+
+TIMESTAMP SOURCES:
+  - Cameras: Use GPS time (already UTC)
+  - Server: Use system clock synchronized via NTP
+  - Simulation: Use elapsed time from start
+
+TIMESTAMP USAGE:
+  - Packet timestamp: Time of capture (when frame was grabbed)
+  - Server receive time: Time packet was received (for latency calc)
+  - Track update time: Time of last detection match
+  - Log timestamps: All logs use Unix timestamp format
+
+TIME DELTAS:
+  - Always in seconds (float)
+  - Example: dt = 0.033 (for 30 FPS)
+  - Never use milliseconds or other units
+
+FRAME RATE:
+  - Specified in Hz (frames per second)
+  - Example: 30.0 Hz, not "30 FPS" as string
+  - Frame period: dt = 1.0 / frame_rate
+
+================================================================================
+3. UNITS OF MEASUREMENT
+================================================================================
+
+DISTANCE:
+  - ALWAYS meters
+  - Never feet, kilometers, centimeters
+  - Sub-meter precision: use decimals (e.g., 0.5m)
+
+VELOCITY:
+  - ALWAYS meters per second (m/s)
+  - Never km/h, mph, knots
+  - Conversion: 1 m/s = 3.6 km/h = 2.237 mph
+
+ACCELERATION:
+  - ALWAYS meters per second squared (m/s²)
+
+ANGLES:
+  - ALWAYS degrees, not radians (except internal math)
+  - Convert to radians only for trigonometric functions
+  - Constants: DEG_TO_RAD = π/180, RAD_TO_DEG = 180/π
+
+TEMPERATURE (if used):
+  - ALWAYS Celsius
+  - Never Fahrenheit or Kelvin in external interfaces
+
+FREQUENCY:
+  - Hertz (Hz) for repetition rates
+  - Example: 30 Hz, 1000 Hz (not "30 times per second")
+
+================================================================================
+4. DATA STRUCTURES & TYPES
+================================================================================
+
+MOTION VECTOR:
+  - azimuth: uint16 [0, 65535] scaled to [0, 360) degrees
+  - elevation: int16 [-32768, 32767] scaled to [-90, 90] degrees
+  - intensity: uint8 [0, 255]
+  - class_id: uint8 [0, 255]
+  - Total size: 6 bytes when packed (2+2+1+1)
+
+TELEMETRY PACKET:
+  Header:
+    - version: uint8 (current = 3)
+    - node_id: char[4] (e.g., "RPI1", null-padded if needed)
+    - timestamp: float64 (Unix timestamp)
+    - sequence_number: uint32 (if version >= 3)
+    - latitude: float64 (degrees)
+    - longitude: float64 (degrees)
+    - altitude: float32 (meters)
+    - orientation: float32[4] (quaternion [w,x,y,z])
+    - vector_count: uint16
+    - flags: uint16 (Status bits: GPS_FIX, IMU_CALIBRATED, etc.)
+  Body:
+    - vectors: MotionVector[vector_count]
+  Footer (if security enabled):
+    - signature: uint8[32] (HMAC-SHA256)
+
+POSITION (3D):
+  - Type: float[3] or numpy array shape (3,)
+  - Order: [X, Y, Z] corresponding to [East, North, Up]
+  - Example: np.array([50.0, 75.0, 100.0])
+
+VELOCITY (3D):
+  - Type: float[3] or numpy array shape (3,)
+  - Order: [vX, vY, vZ] corresponding to [East, North, Up] velocities
+  - Units: m/s
+  - Example: np.array([5.0, 0.0, 0.5])
+
+COVARIANCE MATRIX:
+  - Type: float[N,N] (square matrix)
+  - Symmetric: C[i,j] = C[j,i]
+  - Positive semi-definite
+  - Diagonal elements = variances (always >= 0)
+  - Off-diagonal = covariances
+
+TRACK STATE:
+  - Enum: TENTATIVE = 0, CONFIRMED = 1, LOST = 2, DELETED = 3
+  - Never use strings for state in data structures
+  - String representation for logging/display only
+
+HEALTH STATE:
+  - Enum: HEALTHY = 0, DEGRADED = 1, FAILING = 2, OFFLINE = 3
+  - Never use strings for state in data structures
+
+================================================================================
+5. NETWORK PROTOCOL
+================================================================================
+
+BYTE ORDER (Endianness):
+  - Network byte order: BIG ENDIAN
+  - Use struct pack format characters: '!' prefix for network order
+  - Example: struct.pack('!f', value)
+
+PACKET STRUCTURE:
+  - Fixed header + variable body + optional footer
+  - No padding bytes unless explicitly specified
+  - All multi-byte integers: big endian
+
+STRING ENCODING:
+  - UTF-8 for all text
+  - Fixed-length strings: null-padded to declared length
+  - node_id "RPI1" stored as b'RPI1' (4 bytes)
+
+FLOATING POINT:
+  - float32: IEEE 754 single precision (4 bytes)
+  - float64: IEEE 754 double precision (8 bytes)
+  - GPS coordinates: ALWAYS float64 for precision
+  - Orientation quaternions: float32 acceptable
+  - Timestamps: ALWAYS float64
+
+SEQUENCE NUMBERS:
+  - Start at 0 for first packet
+  - Increment by 1 for each packet sent
+  - Wrap around at 2³² (uint32 max)
+  - Detect gaps: if seq_new != (seq_last + 1) % 2³², packet lost
+
+================================================================================
+6. MATHEMATICAL CONVENTIONS
+================================================================================
+
+VECTOR OPERATIONS:
+  - Dot product: a · b = sum(a[i] * b[i])
+  - Cross product: Right-hand rule (a × b)
+  - Normalization: v_norm = v / ||v|| where ||v|| = sqrt(v · v)
+
+MATRIX OPERATIONS:
+  - Matrix multiply: C = A @ B (NumPy convention)
+  - Element-wise: C = A * B (NumPy convention)
+  - Inverse: Use np.linalg.inv(A)
+  - Transpose: A.T
+
+QUATERNION OPERATIONS:
+  - Multiplication: q3 = q2 * q1 (applies q1 then q2)
+  - Conjugate: q* = [w, -x, -y, -z]
+  - Inverse: q⁻¹ = q* / (q · q) = q* if normalized
+  - Rotate vector: v' = q * v * q* (where v = [0, vx, vy, vz])
+
+DISTANCE METRICS:
+  - Euclidean: d = sqrt((x2-x1)² + (y2-y1)² + (z2-z1)²)
+  - Mahalanobis: d = sqrt((x-μ)ᵀ Σ⁻¹ (x-μ))
+
+INTERPOLATION:
+  - Linear: f(t) = a + t*(b-a) where t ∈ [0,1]
+  - SLERP (quaternions): Use proper spherical interpolation
+
+================================================================================
+7. ERROR HANDLING & VALIDATION
+================================================================================
+
+RANGE VALIDATION:
+  - GPS latitude: MUST be in [-90, 90]
+  - GPS longitude: MUST be in [-180, 180]
+  - Azimuth: MUST normalize to [0, 360)
+  - Elevation: MUST clamp to [-90, 90]
+  - Quaternion: MUST normalize to unit length
+  - Timestamps: MUST be positive, reasonable (not year 1970 or 2100)
+
+NULL/MISSING VALUES:
+  - Use None in Python (not -1, -999, or magic numbers)
+  - For numeric arrays, use np.nan if appropriate
+  - Always document what None/nan means
+
+EXCEPTION TYPES:
+  - ValueError: Invalid data (e.g., latitude = 200)
+  - TypeError: Wrong type (e.g., expecting float, got string)
+  - RuntimeError: System state error
+  - AuthenticationError: Security validation failed
+  - Custom exceptions: Define in common/exceptions.py
+
+VALIDATION FUNCTIONS:
+  - validate_gps(lat, lon, alt) → raises ValueError if invalid
+  - validate_quaternion(q) → raises ValueError if not unit length
+  - validate_timestamp(t) → raises ValueError if unreasonable
+  - normalize_azimuth(az) → returns az % 360.0
+
+================================================================================
+8. CONFIGURATION & CONSTANTS
+================================================================================
+
+CONFIGURATION SOURCE:
+  - Primary: config.yaml or config.json
+  - Override: Environment variables
+  - Fallback: Default values in config.py
+
+NAMING CONVENTIONS:
+  - Config sections: lowercase (e.g., network, tracking)
+  - Config keys: snake_case (e.g., server_port, max_track_age)
+  - Environment vars: UPPERCASE (e.g., OPTICAL_RADAR_SERVER_PORT)
+
+PHYSICAL CONSTANTS:
+  - Earth semi-major axis: WGS84_A = 6378137.0 meters
+  - Earth semi-minor axis: WGS84_B = 6356752.314245 meters
+  - Earth flattening: WGS84_F = 1/298.257223563
+  - Define once in common/constants.py or math_utils/geo.py
+
+MAGIC NUMBERS:
+  - Never use magic numbers in code
+  - Define as named constants
+  - Example: MAX_VECTORS = 100, not for i in range(100)
+
+================================================================================
+9. NAMING CONVENTIONS (CODE)
+================================================================================
+
+MODULES:
+  - snake_case: kalman_filter.py, data_association.py
+  - Never: KalmanFilter.py or kalmanFilter.py
+
+CLASSES:
+  - PascalCase: KalmanFilter, TrackManager, TelemetryPacket
+  - Never: kalman_filter, Kalman_Filter
+
+FUNCTIONS/METHODS:
+  - snake_case: calculate_distance, update_track, get_position
+  - Never: calculateDistance, GetPosition
+
+VARIABLES:
+  - snake_case: current_position, track_id, azimuth_deg
+  - Descriptive, not abbreviated unless standard (pos for position OK)
+
+CONSTANTS:
+  - UPPER_SNAKE_CASE: MAX_TRACK_AGE, WGS84_A, VERSION
+  - Module-level constants only
+
+PRIVATE MEMBERS:
+  - Leading underscore: _internal_state, _calculate_helper()
+  - Not enforced, but convention for "internal use"
+
+================================================================================
+10. LOGGING & METRICS
+================================================================================
+
+LOG LEVELS (decreasing severity):
+  - CRITICAL = 50
+  - ERROR = 40
+  - WARNING = 30
+  - INFO = 20
+  - DEBUG = 10
+
+LOG STRUCTURE:
+  {
+    "timestamp": 1738123445.123,  # Unix timestamp, float
+    "level": "INFO",               # String uppercase
+    "component": "udp_server",     # Module name
+    "message": "Camera connected", # Human-readable
+    "camera_id": "RPI1",          # Context fields (optional)
+    "ip_address": "192.168.1.10"  # Context fields (optional)
+  }
+
+METRIC NAMES:
+  - snake_case with units suffix if relevant
+  - Examples: packets_received_total, frame_time_seconds
+  - Counter suffix: _total or _count
+  - Gauge: no suffix (active_tracks, temperature_celsius)
+
+METRIC LABELS:
+  - Key-value pairs: {"camera_id": "RPI1", "state": "confirmed"}
+  - Use sparingly (high cardinality = memory issue)
+
+================================================================================
+11. THREADING & CONCURRENCY
+================================================================================
+
+THREAD SAFETY:
+  - UDP server: Runs in background thread
+  - Main loop: Single-threaded processing
+  - Shared data: Protect with locks or use thread-safe queues
+
+SYNCHRONIZATION:
+  - Use threading.Lock for shared state
+  - Use queue.Queue for producer-consumer patterns
+  - Document which functions are thread-safe
+
+CALLBACKS:
+  - Called from network thread
+  - Should be fast (don't block)
+  - Pass data to queue, process in main thread
+
+================================================================================
+12. TESTING & VALIDATION
+================================================================================
+
+UNIT TESTS:
+  - Use pytest framework
+  - Test file naming: test_<module_name>.py
+  - Test function naming: test_<function_name>_<scenario>()
+
+TOLERANCE FOR FLOATING POINT:
+  - Never: assert a == b (for floats)
+  - Always: assert abs(a - b) < epsilon
+  - Recommended epsilon: 1e-6 for meters, 1e-9 for degrees
+
+MOCK DATA:
+  - Use deterministic random seeds for reproducibility
+  - Example: np.random.seed(42) at start of test
+
+INTEGRATION TESTS:
+  - Use simulator with known ground truth
+  - Validate end-to-end behavior
+  - Measure actual accuracy vs expected
+
+================================================================================
+13. VERSION COMPATIBILITY
+================================================================================
+
+PROTOCOL VERSION:
+  - VERSION = 2: Legacy (no security, no sequence numbers)
+  - VERSION = 3: Current (security + sequence numbers)
+  - Server MUST support both during transition
+  - Check version field first, then deserialize accordingly
+
+API COMPATIBILITY:
+  - Don't break public APIs without version bump
+  - Deprecate first, then remove in next major version
+  - Document breaking changes
+
+CONFIG COMPATIBILITY:
+  - New config keys: Must have defaults
+  - Removed keys: Log warning if present, ignore
+  - Renamed keys: Support both old and new names initially
+
+================================================================================
+14. PERFORMANCE REQUIREMENTS
+================================================================================
+
+PROCESSING LATENCY:
+  - Target: < 50ms per frame (20 FPS minimum)
+  - Voxel update: < 10ms
+  - Tracking: < 5ms
+  - Network handling: < 1ms
+
+MEMORY LIMITS:
+  - Voxel grid: Keep sparse if > 1GB
+  - Track history: Limit to recent N entries
+  - Log buffer: Rotate before exceeding memory
+
+NETWORK:
+  - Max packet size: 512 bytes (configurable)
+  - Timeout: 100ms for UDP receive
+  - Backpressure: Drop oldest if queue exceeds limit
+
+================================================================================
+15. CRITICAL GOTCHAS & COMMON MISTAKES
+================================================================================
+
+⚠️ ANGLE WRAPPING:
+   - BAD: if az > 360: az = 0  # Loses 360-370° range
+   - GOOD: az = az % 360.0     # Wraps correctly
+
+⚠️ QUATERNION NORMALIZATION:
+   - ALWAYS normalize after operations
+   - Numerical errors accumulate, breaks orthogonality
+
+⚠️ TIMESTAMP COMPARISON:
+   - BAD: if timestamp == expected  # Float equality
+   - GOOD: if abs(timestamp - expected) < 0.001
+
+⚠️ COORDINATE SYSTEM MIX:
+   - NEVER mix ENU and ECEF without conversion
+   - ALWAYS document which system function expects/returns
+
+⚠️ UNIT CONVERSIONS:
+   - NEVER assume units, always document
+   - ALWAYS validate input units on API boundaries
+
+⚠️ ENDIANNESS:
+   - ALWAYS use network byte order for protocol
+   - NEVER use native byte order for packets
+
+⚠️ SEQUENCE NUMBER WRAPAROUND:
+   - Account for uint32 overflow: (new - old) % 2³²
+   - Gap detection must handle wraparound
+
+================================================================================
+FINAL CHECKLIST FOR IMPLEMENTERS
+================================================================================
+
+Before implementing ANY module:
+  ☐ Read this entire conventions document
+  ☐ Understand coordinate systems and transformations
+  ☐ Know the packet format and network protocol
+  ☐ Use correct units (meters, degrees, seconds)
+  ☐ Use Unix timestamps (float64, UTC)
+  ☐ Follow naming conventions
+  ☐ Validate inputs and handle errors
+  ☐ Add logging with structured fields
+  ☐ Write unit tests with proper tolerances
+  ☐ Document assumptions and edge cases
+
+When integrating modules:
+  ☐ Verify coordinate system compatibility
+  ☐ Verify time format compatibility
+  ☐ Verify unit compatibility
+  ☐ Verify data structure format matches
+  ☐ Test with real data, not just unit tests
+  ☐ Measure end-to-end latency and accuracy
+
+================================================================================
+REVISION HISTORY
+================================================================================
+
+Version 1.0 - 2026-01-29
+  - Initial conventions document for Phase 1 implementation
+  - Covers all subsystems: tracking, monitoring, security, validation
+  - Coordinate systems, time, units, data structures defined
+
+If you find ambiguities or conflicts, UPDATE THIS DOCUMENT FIRST, 
+then implement. Do not create implicit conventions in code.
+
+================================================================================

@@ -1,0 +1,195 @@
+FILE: metrics.py
+PURPOSE: Collect and export system performance metrics.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This module tracks how well the system is performing over time.
+It's like a "fitness tracker" for the radar system.
+
+Metrics can be used for debugging, optimization, and monitoring dashboards.
+
+--------------------------------------------------------------------------------
+METRICS CATEGORIES
+--------------------------------------------------------------------------------
+
+SYSTEM METRICS:
+  - Server uptime
+  - CPU usage
+  - Memory usage
+  - Frame processing time (ms)
+
+NETWORK METRICS:
+  - Total packets received per second
+  - Total bytes received per second
+  - Packet loss rate (aggregate)
+  - Average network latency
+
+VOXEL GRID METRICS:
+  - Total rays processed per second
+  - Total voxel updates per second
+  - Hot voxel count (detections)
+  - Grid memory usage
+
+DETECTION METRICS:
+  - Detections per second
+  - Average detections per camera
+  - Detection spatial distribution
+
+TRACKING METRICS (if enabled):
+  - Active tracks count
+  - New tracks per second
+  - Lost tracks per second
+  - Average track lifetime
+
+CALIBRATION METRICS:
+  - Calibration iterations performed
+  - Average correction magnitude
+  - Cameras calibrated vs total cameras
+  - Calibration convergence rate
+
+CAMERA METRICS:
+  - Per-camera message rate
+  - Per-camera packet loss
+  - Per-camera detection count
+
+--------------------------------------------------------------------------------
+METRIC STORAGE
+--------------------------------------------------------------------------------
+
+TIME SERIES DATA:
+  - Store metrics with timestamps
+  - Rolling window (last N minutes/hours)
+  - Configurable retention period
+  - Efficient circular buffer
+
+AGGREGATIONS:
+  - 1-second buckets (real-time)
+  - 1-minute buckets (recent history)
+  - 1-hour buckets (long-term trends)
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. RECORD METRIC
+   INPUT: Metric name, value, timestamp
+   PROCESS:
+     - Add to time series
+     - Update aggregations
+     - Trim old data if beyond retention
+   EXAMPLE: 
+     - record("packets_received", 1, now)
+     - record("voxel_updates", 150, now)
+
+2. INCREMENT COUNTER
+   INPUT: Counter name, amount (default 1)
+   PROCESS: Add to cumulative counter
+   EXAMPLES:
+     - increment("detections_total")
+     - increment("bytes_received", 512)
+
+3. SET GAUGE
+   INPUT: Gauge name, value
+   PROCESS: Record current value (overwrites previous)
+   EXAMPLES:
+     - set_gauge("active_cameras", 15)
+     - set_gauge("cpu_percent", 45.2)
+
+4. RECORD TIMING
+   INPUT: Operation name, duration (ms)
+   PROCESS:
+     - Record latency
+     - Calculate percentiles (p50, p95, p99)
+   EXAMPLES:
+     - record_timing("ray_processing", 12.5)
+     - record_timing("frame_time", 33.2)
+
+5. GET METRIC
+   INPUT: Metric name, time range
+   OUTPUT: Time series data for that metric
+
+6. GET SUMMARY
+   OUTPUT: Current snapshot of all key metrics
+   
+   Example:
+   ```
+   System Metrics Summary
+   ======================
+   Uptime: 2h 34m
+   Cameras: 15 online, 0 offline
+   Detections/sec: 45
+   Packet loss: 2.3%
+   Active tracks: 8
+   Frame time: 28ms (p95: 35ms)
+   ```
+
+7. EXPORT METRICS
+   OUTPUT FORMATS:
+     - Prometheus format (for Grafana)
+     - JSON (for custom dashboards)
+     - CSV (for analysis)
+
+--------------------------------------------------------------------------------
+PROMETHEUS INTEGRATION
+--------------------------------------------------------------------------------
+
+If Prometheus monitoring is enabled:
+  - Expose metrics on HTTP endpoint (/metrics)
+  - Use standard metric types:
+    * Counter: packets_received_total
+    * Gauge: active_cameras_count
+    * Histogram: frame_processing_seconds
+  - Add labels for dimensions (camera_id, track_id, etc.)
+
+Example Prometheus metrics:
+```
+# HELP packets_received_total Total packets received
+# TYPE packets_received_total counter
+packets_received_total{camera_id="RPI1"} 45234
+
+# HELP active_tracks Current number of active tracks
+# TYPE active_tracks gauge
+active_tracks 8
+
+# HELP frame_processing_seconds Time to process one frame
+# TYPE frame_processing_seconds histogram
+frame_processing_seconds_bucket{le="0.01"} 150
+frame_processing_seconds_bucket{le="0.05"} 890
+```
+
+--------------------------------------------------------------------------------
+VISUALIZATION
+--------------------------------------------------------------------------------
+
+Metrics can be displayed in:
+  - Terminal (real-time text dashboard)
+  - Grafana (rich web dashboards)
+  - Visualizer window (overlay stats)
+  - Log files (periodic summaries)
+
+================================================================================
+INTEGRATION WITH SYSTEM
+================================================================================
+
+Instrumentation points:
+  - udp_server.py: Record packet receipt
+  - voxel_grid.py: Record ray/voxel processing
+  - tracker.py: Record track lifecycle events
+  - server_main.py: Record frame times, system stats
+
+Periodic export:
+  - Every 1 second: Update real-time dashboard
+  - Every 60 seconds: Log summary to file
+  - Continuous: Serve Prometheus endpoint
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Diagnose performance bottlenecks
+- Prove system is working correctly
+- Capacity planning (how many cameras can we handle?)
+- Historical analysis of incidents
+- Real-time operational awareness

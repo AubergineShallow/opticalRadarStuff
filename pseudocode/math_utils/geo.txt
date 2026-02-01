@@ -1,0 +1,65 @@
+FILE: geo.py
+PURPOSE: Convert between different ways of describing locations on Earth.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This file converts between different ways of saying "where is this?"
+
+Think about giving directions:
+- "37.7749 North, 122.4194 West" (GPS coordinates)
+- "50 meters East and 30 meters North of the park" (local directions)
+
+Computers need to switch between these formats.
+
+--------------------------------------------------------------------------------
+LOCATION FORMATS
+--------------------------------------------------------------------------------
+
+1. GPS (Latitude, Longitude, Altitude)
+   - What: The standard format from satellites
+   - Example: San Francisco is at 37.7749°N, 122.4194°W
+   - Problem: Hard to calculate distances
+
+2. ECEF (Earth-Centered, Earth-Fixed)
+   - What: X, Y, Z from Earth's center
+   - Like if Earth was a ball and you measured from the middle
+   - Good for: Precise calculations
+
+3. ENU (East, North, Up)
+   - What: Meters from a reference point
+   - Example: "50m East, -20m North, 100m Up from home base"
+   - Good for: Local calculations, easy to understand
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. GPS TO ECEF
+   - Take: latitude, longitude, altitude
+   - Give: X, Y, Z from Earth's center
+   - Uses: Earth's shape (not a perfect sphere)
+
+2. ECEF TO ENU
+   - Take: X, Y, Z position and a reference point
+   - Give: meters East, North, Up from reference
+   - Like: "How far am I from home?"
+
+3. GPS TO LOCAL METERS
+   - Take: GPS coordinates and a home base GPS
+   - Give: meters East, North, Up from home base
+   - Shortcut: Does both conversions at once
+
+4. CALCULATE LOOK ANGLES
+   - Take: Where you are, where the target is (both in ENU)
+   - Give: Direction to look (compass heading and up/down angle)
+   - Like: "To see the bird, look 45° to the right and 30° up"
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Cameras have GPS but need local coordinates
+- The server needs to combine views from cameras in different places
+- Distances like "how far is that object?" need local coordinates

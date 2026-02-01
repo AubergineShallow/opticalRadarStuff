@@ -1,0 +1,77 @@
+FILE: calibration.py (Phase 1)
+PURPOSE: Solves alignment errors, now with VALIDATION steps.
+
+================================================================================
+WHAT THIS FILE DOES
+================================================================================
+Calculates rotation corrections. In Phase 1, it asks permission from the
+Validator before applying changes, to prevent "correcting" into a wrong state.
+
+--------------------------------------------------------------------------------
+THE LOOP
+--------------------------------------------------------------------------------
+
+1. ACCUMULATE
+   - Receive (CameraRay, ConfirmedTrackPosition) pairs
+     NOTE: Uses CONFIRMED TRACKS not raw hot voxels to prevent circular
+     self-validation where a camera calibrates against its own voxel.
+   - Store in history buffer (Ring Buffer size 2000)
+
+2. SOLVE (Periodic - every 10 seconds)
+   - Perform gradient descent optimization to find axis-angle correction
+   - Minimize residual error: distance between ray and target position
+   - Result: Proposed Correction Quaternion (Q_new) + residual metrics
+
+3. VALIDATE (New Step)
+   - Call validator.validate_correction(cam_id, correction_degrees)
+   - Checks:
+     * Is the change too sudden? (> 5 degrees)
+     * Does it improve detection consistency?
+     * Does it agree with Ground Truth (if avail)?
+
+   - IF REJECTED:
+     * Log Warning ("Calibration Diverging")
+     * Discard Q_new
+     * Return CalibrationResult with approved=False
+
+   - IF APPROVED:
+     * Proceed to Apply
+
+4. APPLY
+   - Return CalibrationResult to server_main
+   - Server applies correction via ray_builder.set_calibration_offset()
+   - Blend factor = 0.1 (Slow update, applied by server)
+   NOTE: Corrections are applied SERVER-SIDE to the RayBuilder, NOT sent
+   as packets to cameras. This avoids camera-side complexity.
+
+--------------------------------------------------------------------------------
+INTERNAL CLASS: _LocalCalibrationObservation
+--------------------------------------------------------------------------------
+Used internally by the solver. Fields:
+  - camera_id: Which camera made this observation
+  - ray_direction: Unit vector of the detection ray
+  - target_position: Confirmed track position in ENU
+  - camera_position: Camera position in ENU
+  - timestamp: When the observation was made
+
+--------------------------------------------------------------------------------
+INTEGRATION
+--------------------------------------------------------------------------------
+Input: Observations from Server Main (via add_observation method)
+Output: CalibrationResult to Server Main (via process method)
+Dependency: CalibrationValidator (optionally injected on init)
+
+--------------------------------------------------------------------------------
+KEY METHODS
+--------------------------------------------------------------------------------
+add_observation(camera_id, ray_direction, target_position, camera_position)
+  - Adds an observation to the buffer for later solving
+
+process() -> List[CalibrationResult]
+  - Called every frame, triggers solve periodically
+  - Returns list of approved (or rejected) calibration results
+
+solve(camera_id) -> CalibrationResult
+  - Performs gradient descent to find optimal correction
+  - Validates with CalibrationValidator if present
+

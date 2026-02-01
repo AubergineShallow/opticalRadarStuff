@@ -1,0 +1,96 @@
+FILE: protocol.py
+PURPOSE: Defines how cameras talk to the main computer (Version 3).
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This file describes the "language" (protocol) that cameras and the server use.
+Version 3 adds security (signatures) and reliability (sequence numbers).
+
+--------------------------------------------------------------------------------
+PACKET STRUCTURE (Version 3)
+--------------------------------------------------------------------------------
+
+[ HEADER (60 bytes) ] + [ BODY (Variable) ] + [ FOOTER (32 bytes) ]
+
+1. HEADER:
+   - Version: uint8 (Must be 3)
+   - Node ID: char[4] (e.g., "RPI1")
+   - Timestamp: float64 (Unix time, GPS synchronized)
+   - Sequence Number: uint32 (Increments 1, 2, 3... detects lost packets)
+   - Location: Lat/Lon/Alt (float64, float64, float32)
+   - Orientation: Quaternion [w,x,y,z] (float32[4])
+   - Vector Count: uint16 (How many items in body)
+   - Flags: uint16 (Status bits: GPS_FIX, IMU_CALIBRATED, etc.)
+
+2. BODY (Motion Vectors):
+   - List of 6-byte vectors (Azimuth, Elevation, Intensity, ClassID)
+   - Same as Version 2
+
+3. FOOTER (Security):
+   - HMAC-SHA256 Signature (32 bytes)
+   - Signs the entire packet (Header + Body) using shared secret key
+   - Prevents tampering and spoofing
+
+--------------------------------------------------------------------------------
+PACKET TYPES
+--------------------------------------------------------------------------------
+
+TYPE 1: TELEMETRY (Standard)
+  - Contains motion vectors from camera
+  - Sent 30 times per second
+
+TYPE 2: GROUND_TRUTH (Simulation only)
+  - Contains true positions of objects (from simulator)
+  - Used for validation
+  - Flagged in header or separate port
+
+TYPE 3: CALIBRATION_CMD (Server to Camera)
+  - Correction quaternion
+  - Signed by server
+
+--------------------------------------------------------------------------------
+SECURITY MECHANISM
+--------------------------------------------------------------------------------
+
+SIGNING (Camera side):
+  1. Build Packet = Header + Body
+  2. Signature = HMAC_SHA256(SecretKey, Packet)
+  3. Final data = Packet + Signature
+
+VERIFICATION (Server side):
+  1. Split received data into Packet + claimed Signature
+  2. Calculate Expected = HMAC_SHA256(SecretKey, Packet)
+  3. If Expected == Claimed: Process it
+  4. If Mismatch: Drop it (Security Log: Auth Fail)
+
+REPLAY PROTECTION:
+  - Server checks Timestamp (must be within 30s of now)
+  - Server checks Sequence Number (must be > last seen)
+
+--------------------------------------------------------------------------------
+CHANGES FROM VERSION 2
+--------------------------------------------------------------------------------
+
+- Added Sequence Number (4 bytes)
+- Added Flags field (2 bytes)
+- Added Signature Footer (32 bytes)
+- Header size increased
+- Security is now MANDATORY for Version 3
+
+================================================================================
+HOW TO USE
+================================================================================
+
+PACKING:
+  packet = Protocol.pack_telemetry(node_id, vectors, pose, seq_num, key)
+
+UNPACKING:
+  try:
+      data = Protocol.unpack(raw_bytes, key)
+      # data contains verified vectors and metadata
+  except AuthError:
+      # Signature mismatch
+  except OldPacketError:
+      # Replay attack or delayed packet

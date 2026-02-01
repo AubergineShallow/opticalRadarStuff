@@ -1,0 +1,71 @@
+FILE: config.txt
+PURPOSE: Centralized configuration management for Server and Nodes.
+
+================================================================================
+WHAT THIS FILE DOES
+================================================================================
+Defines the structure of the `config.yaml` file that controls the system.
+No more hardcoded constants in Python files!
+
+--------------------------------------------------------------------------------
+CONFIG STRUCTURE (YAML)
+--------------------------------------------------------------------------------
+
+system:
+  version: 3
+  debug_mode: false
+  headless: false  # If true: compute only, no vision
+
+network:
+  server_ip: "0.0.0.0"
+  udp_port: 5005
+  max_packet_size: 512
+
+security:
+  enabled: true
+  key_file: "secrets/shared.key"
+  auth_timeout_sec: 30
+
+tracking:
+  max_tracks: 100
+  min_hits_to_confirm: 3
+  max_misses_to_delete: 30
+  distance_threshold_m: 5.0
+  q_process_noise: 0.1
+  r_measurement_noise: 2.0
+
+grid:
+  width_m: 200         # East-West dimension
+  depth_m: 200         # North-South dimension
+  height_m: 100        # Vertical dimension
+  resolution_m: 1.0
+  decay_rate: 0.95
+  hot_threshold: 5.0
+
+monitoring:
+  log_level: "INFO"
+  log_file: "logs/sys.log"
+  metrics_enabled: true
+  prometheus_port: 8000
+
+--------------------------------------------------------------------------------
+USAGE IN CODE
+--------------------------------------------------------------------------------
+
+from common import config
+
+def startup():
+    conf = config.load("config.yaml")
+    
+    # Use values
+    server = UDPServer(port=conf.network.udp_port)
+    tracker = Tracker(threshold=conf.tracking.distance_threshold_m)
+
+--------------------------------------------------------------------------------
+ENVIRONMENT OVERRIDES
+--------------------------------------------------------------------------------
+Any config value can be overridden by Environment variables:
+OR_NETWORK_UDP_PORT=5006 ./run_server.py
+OR_SECURITY_ENABLED=false ./run_server.py
+
+This is crucial for Docker/Production deployment without changing code.

@@ -1,0 +1,5 @@
+{
+  "name": "Optical Radar UI",
+  "description": "A high-performance 3D visualization interface for an optical radar system using DeckGL with ENU coordinate systems and real-time tactical overlays.",
+  "requestFramePermissions": []
+}

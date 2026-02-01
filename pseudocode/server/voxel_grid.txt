@@ -1,0 +1,117 @@
+FILE: voxel_grid.py
+PURPOSE: A 3D grid of boxes that tracks where objects are in the sky.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+Imagine the sky divided into thousands of small invisible boxes (voxels).
+This file manages those boxes and tracks which ones might have objects.
+
+--------------------------------------------------------------------------------
+THE GRID
+--------------------------------------------------------------------------------
+
+SETUP:
+  - Create a 3D grid of boxes
+  - Each box is 1 meter x 1 meter x 1 meter (configurable)
+  - Grid covers 200m x 200m x 100m = 4 million boxes
+  - Each box has a "heat" value (starts at 0)
+
+HOW IT WORKS:
+  - When a camera sees something, it draws a line through the grid
+  - Every box the line passes through gets warmer (+intensity heat)
+  - If multiple cameras see the same object, their lines cross
+  - The box where lines cross gets very hot (many cameras pointing there)
+  - Hot boxes = probable object locations
+
+--------------------------------------------------------------------------------
+CONFIGURATION (VoxelGridConfig)
+--------------------------------------------------------------------------------
+width_m: 200.0       # Grid width in meters
+height_m: 100.0      # Grid height in meters  
+depth_m: 200.0       # Grid depth in meters
+resolution_m: 1.0    # Voxel size in meters
+decay_rate: 0.95     # Heat multiplier per decay cycle
+hot_threshold: 5.0   # Heat level to be considered "hot"
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. ADD RAY (add_ray)
+   INPUT: origin, direction, intensity, max_distance, step_size
+   PROCESS:
+     - Walk along the ray step by step
+     - At each step, find which voxel you're in
+     - Add heat to that voxel (heat += intensity)
+   RESULT: Returns count of voxels updated
+   NOTE: Uses native C++ acceleration when available for performance
+
+2. ADD RAYS BATCH (add_rays_batch)
+   INPUT: List of (origin, direction, intensity) tuples
+   PROCESS:
+     - Process all rays efficiently in one call
+     - Uses native C++ batch processing when available
+   RESULT: Total voxels updated
+
+3. DECAY (Cool down over time)
+   PROCESS:
+     - Multiply all heat values by decay_rate (e.g., 0.95)
+     - Old detections fade away, only fresh ones remain
+   RESULT: Grid slowly cools
+
+4. GET HOT VOXELS (get_hot_voxels)
+   INPUT: Optional threshold (default: config.hot_threshold)
+   PROCESS:
+     - Find all voxels with heat > threshold
+   OUTPUT: List of HotVoxel objects with (x, y, z, heat, center_position)
+
+5. GET DETECTIONS (get_detections)
+   INPUT: threshold, cluster_radius
+   PROCESS:
+     - Get all hot voxels
+     - Cluster nearby voxels together
+     - Return centroid of each cluster
+   OUTPUT: List of 3D positions (detection centroids)
+   USE: Feed these to the Tracker
+
+6. WORLD TO GRID (world_to_grid)
+   INPUT: World position [x, y, z] in meters
+   OUTPUT: Grid indices (ix, iy, iz)
+
+7. GRID TO WORLD (grid_to_world)
+   INPUT: Grid indices (ix, iy, iz)
+   OUTPUT: World position of voxel center
+
+8. GET STATS (get_stats)
+   OUTPUT: Dictionary with grid statistics
+     - total_voxels
+     - hot_count
+     - max_heat
+     - mean_heat
+
+--------------------------------------------------------------------------------
+NATIVE ACCELERATION
+--------------------------------------------------------------------------------
+
+The voxel grid supports optional C++ acceleration via the native module.
+See code/native/README.md for build instructions.
+
+When native module is available:
+  - add_ray: ~15x faster
+  - add_rays_batch: ~50x faster
+  - decay: ~25x faster
+
+When native module is NOT available:
+  - Pure Python fallback is used automatically
+  - System still works, just slower
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- This is how the system finds objects in 3D space
+- Multiple cameras = overlapping lines = confident detection
+- Decay prevents old data from cluttering the grid
+- Clustering converts raw voxels into usable detection positions
