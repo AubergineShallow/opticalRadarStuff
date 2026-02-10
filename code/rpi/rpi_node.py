@@ -10,7 +10,9 @@ import sys
 import os
 from typing import Optional
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+_parent = os.path.dirname(os.path.dirname(__file__))
+if _parent not in sys.path:
+    sys.path.insert(0, _parent)
 
 from common.config import load as load_config
 from common.constants import UDP_PORT, TARGET_FPS, PROTOCOL_VERSION
@@ -69,11 +71,9 @@ class RPiNode:
             fps=TARGET_FPS
         ))
         
-        gps_port = self.config.gps.port if hasattr(self.config, 'gps') else "/dev/serial0"
-        self.gps = GPSReader(port=gps_port, mock=mock)
+        self.gps = GPSReader(port=self.config.gps.port, mock=mock)
         
-        i2c_addr = self.config.imu.i2c_address if hasattr(self.config, 'imu') else 0x68
-        self.imu = IMUReader(i2c_address=i2c_addr, mock=mock)
+        self.imu = IMUReader(i2c_address=self.config.imu.i2c_address, mock=mock)
         
         # Network
         self._socket: Optional[socket.socket] = None
@@ -212,10 +212,6 @@ class RPiNode:
         # 4. Build packet
         protocol_vectors = []
         for v in vectors:
-            # Scale angles to uint16
-            az_scaled = int((v.azimuth % 360) / 360 * 65535)
-            el_scaled = int((v.elevation + 90) / 180 * 65535)
-            
             protocol_vectors.append(ProtocolMotionVector(
                 azimuth=v.azimuth,
                 elevation=v.elevation,

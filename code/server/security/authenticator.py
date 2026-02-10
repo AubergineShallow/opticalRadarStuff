@@ -11,7 +11,10 @@ from typing import Optional, Tuple
 from dataclasses import dataclass
 
 import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(__file__))))
+import os
+_parent = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
+if _parent not in sys.path:
+    sys.path.insert(0, _parent)
 
 from common.protocol import TelemetryPacket, SIGNATURE_SIZE
 

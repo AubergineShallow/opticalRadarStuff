@@ -59,6 +59,18 @@ class MonitoringConfig:
 
 
 @dataclass
+class GPSConfig:
+    port: str = "/dev/serial0"
+    baud_rate: int = 9600
+
+
+@dataclass
+class IMUConfig:
+    i2c_address: int = 0x68
+    calibration_samples: int = 100
+
+
+@dataclass
 class Config:
     """Root configuration object."""
     system: SystemConfig = field(default_factory=SystemConfig)
@@ -67,6 +79,8 @@ class Config:
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     grid: GridConfig = field(default_factory=GridConfig)
     monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
+    gps: GPSConfig = field(default_factory=GPSConfig)
+    imu: IMUConfig = field(default_factory=IMUConfig)
 
 
 def _apply_env_overrides(config: Config) -> Config:
@@ -129,6 +143,10 @@ def load(path: Optional[str] = None) -> Config:
             config.grid = GridConfig(**data['grid'])
         if 'monitoring' in data:
             config.monitoring = MonitoringConfig(**data['monitoring'])
+        if 'gps' in data:
+            config.gps = GPSConfig(**data['gps'])
+        if 'imu' in data:
+            config.imu = IMUConfig(**data['imu'])
     
     # Apply environment overrides
     config = _apply_env_overrides(config)

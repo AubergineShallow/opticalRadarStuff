@@ -12,7 +12,9 @@ from queue import Queue, Empty
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+_parent = os.path.dirname(os.path.dirname(__file__))
+if _parent not in sys.path:
+    sys.path.insert(0, _parent)
 
 from common.protocol import TelemetryPacket, HEADER_SIZE, SIGNATURE_SIZE, PACKET_TYPE_ANNOUNCE, AnnouncePacket
 from common.constants import UDP_PORT, MAX_PACKET_SIZE
@@ -109,7 +111,7 @@ class UDPServer:
                 if packet:
                     try:
                         self._packet_queue.put_nowait(packet)
-                    except:
+                    except Exception:
                         self._packets_dropped += 1
                         
             except socket.timeout:

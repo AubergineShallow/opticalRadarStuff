@@ -9,7 +9,9 @@ from dataclasses import dataclass
 import sys
 import os
 
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+_parent = os.path.dirname(os.path.dirname(__file__))
+if _parent not in sys.path:
+    sys.path.insert(0, _parent)
 
 from math_utils.geo import wgs84_to_enu
 from math_utils.quaternion import rotate_vector

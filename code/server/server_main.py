@@ -35,7 +35,6 @@ try:
         METRIC_PACKETS_PROCESSED, METRIC_ACTIVE_TRACKS, METRIC_VOXEL_UPDATE_TIME
     )
     from .security import Authenticator
-    from .security import Authenticator
     from .validation import CalibrationValidator, GroundTruthValidator
     from .websocket_server import WebSocketBroadcaster
 except ImportError:
@@ -181,6 +180,9 @@ class OpticalRadarServer:
         # State
         self._running = False
         self._frame_count = 0
+        self._start_time = time.time()
+        self._last_frame_time = 0.0
+        self._fps = 0.0
     
     def _on_health_change(self, node_id: str, old_status, new_status) -> None:
         """Handle node health status change."""
@@ -268,10 +270,18 @@ class OpticalRadarServer:
                     cal_result.correction_quaternion
                 )
         
-        # Update visualizer
-        # Update visualizer
+        # Track FPS
+        now = time.time()
+        if self._last_frame_time > 0:
+            dt = now - self._last_frame_time
+            if dt > 0:
+                alpha = 0.1
+                self._fps = alpha * (1.0 / dt) + (1 - alpha) * self._fps
+        self._last_frame_time = now
+        
+        # Update visualizer (reuse detection_positions to avoid redundant computation)
         if self.visualizer:
-            self._update_visualizer()
+            self._update_visualizer(detection_positions)
             
         # Broadcast state via WebSocket
         if self.ws_server:
@@ -280,11 +290,12 @@ class OpticalRadarServer:
     def _broadcast_state(self) -> None:
         """Broadcast system state to UI."""
         # 1. System Status
+        grid_stats = self.voxel_grid.get_stats()
         self.ws_server.broadcast("SYSTEM_STATUS", {
-            "server_fps": 30.0,  # TODO: Calculate actual FPS
+            "server_fps": round(self._fps, 1),
             "total_tracks": len(self.tracker.get_confirmed_tracks()),
-            "total_voxels": 0,  
-            "uptime_seconds": 0,  # TODO: Add uptime
+            "total_voxels": grid_stats['hot_count'],
+            "uptime_seconds": round(time.time() - self._start_time, 1),
             "cpu_percent": 0.0,
             "memory_percent": 0.0
         })
@@ -292,16 +303,17 @@ class OpticalRadarServer:
         # 2. Tracks (consolidated)
         tracks = []
         for track in self.tracker.get_confirmed_tracks():
+            vel = track.velocity
             tracks.append({
-                "track_id": track.track_id,  # Changed from id to track_id
-                "state": 1, # CONFIRMED
+                "track_id": track.track_id,
+                "state": int(track.state),
                 "position": [track.position[0], track.position[1], track.position[2]],
-                "velocity": [0,0,0],
+                "velocity": [float(vel[0]), float(vel[1]), float(vel[2])],
                 "covariance": [],
-                "first_seen": track.first_seen,
-                "last_seen": track.last_seen,
-                "hit_count": track.hit_count,
-                "confidence": 0.8,
+                "first_seen": track.created_at,
+                "last_seen": track.last_update,
+                "hit_count": track.hits,
+                "confidence": track.confidence,
                 "predicted_next": [0,0,0]
             })
         self.ws_server.broadcast("TRACK_UPDATE", tracks)
@@ -359,22 +371,27 @@ class OpticalRadarServer:
         self.logger.info("network", f"Received announcement from {packet.camera_id}")
     
     def _process_ground_truth_packet(self, packet: TelemetryPacket) -> None:
-        """Process ground truth packet for validation."""
-        # Ground truth packets contain known positions for accuracy validation
-        for vec in packet.vectors:
-            # Convert azimuth/elevation to position estimate would require
-            # additional data - for now we log and could extend later
-            pass
+        """Process ground truth packet for validation.
         
-        # If vectors contain actual positions (extended format), add to validator
-        # For standard format, we can use camera position + direction to estimate
-        if hasattr(packet, 'ground_truth_positions'):
-            for i, pos in enumerate(packet.ground_truth_positions):
-                self.ground_truth.add_ground_truth(
-                    object_id=f"gt_{packet.camera_id}_{i}",
-                    position=pos,
-                    timestamp=packet.timestamp
-                )
+        Ground truth packets use the same telemetry format but are tagged as
+        PACKET_TYPE_GROUND_TRUTH. The vectors represent known target positions
+        encoded as azimuth/elevation from the camera. We reconstruct the 3D
+        ray and register the direction with the ground truth validator.
+        """
+        timestamp = packet.timestamp
+        camera_id = packet.camera_id
+        
+        # Build rays from the ground truth vectors (same pipeline as telemetry)
+        rays = self.ray_builder.build_rays_from_packet(packet)
+        
+        for i, ray in enumerate(rays):
+            # Use the ray origin + direction to register the ground truth position
+            # For ground truth, we assume the vector points at the actual object
+            self.ground_truth.add_ground_truth(
+                object_id=f"gt_{camera_id}_{i}",
+                position=ray.origin + ray.direction * 100.0,  # Project along ray
+                timestamp=timestamp
+            )
         
         self.logger.debug("validation", f"Received ground truth from {packet.camera_id}")
     
@@ -474,13 +491,14 @@ class OpticalRadarServer:
         
         return None
     
-    def _update_visualizer(self) -> None:
+    def _update_visualizer(self, detections: list = None) -> None:
         """Update the visualization."""
         if not self.visualizer:
             return
         
-        # Get detection positions
-        detections = self.voxel_grid.get_detections()
+        # Use provided detections or fetch fresh
+        if detections is None:
+            detections = self.voxel_grid.get_detections()
         
         # Get camera positions
         cameras = [

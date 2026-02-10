@@ -11,7 +11,9 @@ from collections import deque
 
 import sys
 import os
-sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+_parent = os.path.dirname(os.path.dirname(__file__))
+if _parent not in sys.path:
+    sys.path.insert(0, _parent)
 
 from math_utils.quaternion import from_axis_angle, multiply, normalize, angle_between
 
@@ -167,20 +169,56 @@ class Calibrator:
         # Calculate current residual
         residual_before = self._calculate_residual(observations)
         
-        # Gradient descent for rotation axis/angle
-        best_correction = (1.0, 0.0, 0.0, 0.0)  # Identity
+        # Iterative gradient descent for rotation correction
+        best_correction = (1.0, 0.0, 0.0, 0.0)  # Identity quaternion
         best_residual = residual_before
         
-        # Try small rotations around each axis
-        for axis in [(1, 0, 0), (0, 1, 0), (0, 0, 1)]:
-            for angle in [-2, -1, -0.5, 0.5, 1, 2]:  # Degrees
-                correction = from_axis_angle(axis, angle)
+        # Current correction angles (degrees) around each axis
+        angles = [0.0, 0.0, 0.0]  # [rx, ry, rz]
+        axes = [(1, 0, 0), (0, 1, 0), (0, 0, 1)]
+        
+        step_size = 0.5  # Initial step in degrees
+        epsilon = 0.05   # Finite difference step
+        
+        for iteration in range(20):
+            # Compute gradient via central finite differences
+            gradient = [0.0, 0.0, 0.0]
+            
+            for i, axis in enumerate(axes):
+                # Forward
+                fwd_angles = angles.copy()
+                fwd_angles[i] += epsilon
+                fwd_q = self._compose_correction(axes, fwd_angles)
+                fwd_residual = self._calculate_residual(observations, fwd_q)
                 
-                residual = self._calculate_residual(observations, correction)
+                # Backward
+                bwd_angles = angles.copy()
+                bwd_angles[i] -= epsilon
+                bwd_q = self._compose_correction(axes, bwd_angles)
+                bwd_residual = self._calculate_residual(observations, bwd_q)
                 
-                if residual < best_residual:
-                    best_correction = correction
-                    best_residual = residual
+                gradient[i] = (fwd_residual - bwd_residual) / (2 * epsilon)
+            
+            # Update angles along negative gradient
+            grad_norm = sum(g**2 for g in gradient) ** 0.5
+            if grad_norm < 1e-6:
+                break  # Converged
+            
+            for i in range(3):
+                angles[i] -= step_size * gradient[i] / grad_norm
+                # Clamp to reasonable range
+                angles[i] = max(-5.0, min(5.0, angles[i]))
+            
+            # Evaluate new correction
+            correction = self._compose_correction(axes, angles)
+            residual = self._calculate_residual(observations, correction)
+            
+            if residual < best_residual:
+                best_correction = correction
+                best_residual = residual
+            
+            # Decay step size
+            step_size *= 0.9
         
         # Calculate correction magnitude
         correction_degrees = angle_between(
@@ -237,6 +275,23 @@ class Calibrator:
             count += 1
         
         return total / max(1, count)
+    
+    def _compose_correction(self, axes, angles):
+        """Compose a correction quaternion from per-axis rotation angles.
+        
+        Args:
+            axes: List of (x, y, z) rotation axes
+            angles: List of angles in degrees, one per axis
+        
+        Returns:
+            Combined quaternion (w, x, y, z)
+        """
+        result = (1.0, 0.0, 0.0, 0.0)  # Identity
+        for axis, angle in zip(axes, angles):
+            if abs(angle) > 1e-8:
+                q = from_axis_angle(axis, angle)
+                result = multiply(result, q)
+        return result
     
     def apply_correction(self, result: CalibrationResult) -> bool:
         """

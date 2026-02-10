@@ -11,7 +11,9 @@ from dataclasses import dataclass
 try:
     import sys
     import os
-    sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
+    _parent = os.path.dirname(os.path.dirname(__file__))
+    if _parent not in sys.path:
+        sys.path.insert(0, _parent)
     from native import native_wrapper
     _NATIVE_MODULE = native_wrapper
 except ImportError:

@@ -19,8 +19,8 @@ PACKET_TYPE_COMMAND = 0x02
 PACKET_TYPE_GROUND_TRUTH = 0x03
 PACKET_TYPE_ANNOUNCE = 0x04
 
-# Header size: 60 bytes for V3
-HEADER_SIZE = 60
+# Header size: 61 bytes for V3 (vector_count is uint16)
+HEADER_SIZE = 61
 SIGNATURE_SIZE = 32
 
 
@@ -192,11 +192,11 @@ class TelemetryPacket:
             self.health_flags
         )
         header += struct.pack(
-            '>B',            # vector_count (1)
-            len(self.vectors) & 0xFF
+            '>H',            # vector_count (2, uint16)
+            len(self.vectors) & 0xFFFF
         )
         
-        # Current: 2 + 8 + 4 + 8 + 8 + 8 + 4 + 16 + 1 + 1 = 60 bytes
+        # Current: 2 + 8 + 4 + 8 + 8 + 8 + 4 + 16 + 1 + 2 = 61 bytes
         assert len(header) == HEADER_SIZE, f"Header size mismatch: {len(header)}"
         
         return header
@@ -239,7 +239,9 @@ class TelemetryPacket:
         qw, qx, qy, qz = struct.unpack_from('>ffff', data, offset)
         offset += 16
         
-        health_flags, vector_count = struct.unpack_from('>BB', data, offset)
+        health_flags, = struct.unpack_from('>B', data, offset)
+        offset += 1
+        vector_count, = struct.unpack_from('>H', data, offset)
         offset += 2
         
         # Unpack vectors
@@ -292,6 +294,55 @@ class CommandPacket:
     CMD_CALIBRATION_UPDATE = 0x01
     CMD_CONFIG_UPDATE = 0x02
     CMD_RESTART = 0x03
+    
+    def pack(self, include_signature: bool = False) -> bytes:
+        """Pack command packet."""
+        cam_id_bytes = self.camera_id.encode('utf-8')[:8].ljust(8, b'\x00')
+        
+        data = struct.pack('>BB', self.version, self.packet_type)
+        data += cam_id_bytes
+        data += struct.pack('>B', self.command_type)
+        data += struct.pack('>H', len(self.payload))
+        data += self.payload
+        
+        if include_signature and self.signature:
+            data += self.signature
+        
+        return data
+    
+    @classmethod
+    def unpack(cls, data: bytes) -> 'CommandPacket':
+        """Unpack command packet from bytes."""
+        offset = 0
+        version, packet_type = struct.unpack_from('>BB', data, offset)
+        offset += 2
+        
+        camera_id = data[offset:offset+8].rstrip(b'\x00').decode('utf-8')
+        offset += 8
+        
+        command_type, = struct.unpack_from('>B', data, offset)
+        offset += 1
+        
+        payload_len, = struct.unpack_from('>H', data, offset)
+        offset += 2
+        
+        payload = data[offset:offset+payload_len]
+        offset += payload_len
+        
+        # Check for signature
+        signature = None
+        remaining = len(data) - offset
+        if remaining >= SIGNATURE_SIZE:
+            signature = data[offset:offset+SIGNATURE_SIZE]
+        
+        return cls(
+            version=version,
+            packet_type=packet_type,
+            camera_id=camera_id,
+            command_type=command_type,
+            payload=payload,
+            signature=signature
+        )
 
 
 def create_telemetry_packet(
