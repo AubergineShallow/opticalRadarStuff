@@ -1,0 +1,112 @@
+FILE: voxel_grid.py
+PURPOSE: A 2D accumulator grid (occupancy grid) that tracks object heat on the ground plane.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+Imagine the ground divided into thousands of small invisible squares (cells).
+This file manages those cells and tracks which ones have heat from camera rays.
+
+Ghost-track prevention: To prevent "ghost" lines from a single camera, a cell 
+must have been seen by AT LEAST TWO different cameras before it shows up as an object.
+
+--------------------------------------------------------------------------------
+THE GRID (2D Fork)
+--------------------------------------------------------------------------------
+
+SETUP:
+  - Create a 2D grid of cells (ground plane)
+  - Each cell is 1 meter x 1 meter (configurable)
+  - Grid covers 200m x 200m area
+  - Each cell has:
+    - A "heat" value (starts at 0)
+    - A "contributor list" (which cameras have pointed here recently)
+
+HOW IT WORKS:
+  - When a camera sees something, it draws a line across the ground grid
+  - Every cell the line passes through gets warmer (+intensity heat)
+  - The cell also records THAT SPECIFIC camera as a contributor
+  - If multiple DIFFERENT cameras see the same object, their lines cross
+  - The cell where lines cross gets many contributors
+  - Hot cells + Multiple Contributors = Valid Object Detection
+
+--------------------------------------------------------------------------------
+CONFIGURATION (VoxelGridConfig)
+--------------------------------------------------------------------------------
+width_m: 200.0       # Grid width (East) in meters
+depth_m: 200.0       # Grid depth (North) in meters
+resolution_m: 1.0    # Cell size in meters
+decay_rate: 0.95     # Heat multiplier per decay cycle
+hot_threshold: 5.0   # Heat level threshold
+min_cameras: 2       # REQUIRED distinct cameras to validate a detection
+contributor_ttl: 30  # How many frames a camera's "vote" stays active
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. ADD RAY (add_ray)
+   INPUT: origin, direction, intensity, max_distance, step_size, camera_id
+   PROCESS:
+     - Walk along the ray across the ground grid
+     - At each step, find the grid cell
+     - Add heat to voxel (heat += intensity)
+     - Record camera_id in cell's contributor map
+   RESULT: Returns count of cells updated
+   NOTE: Uses native C++ acceleration (via 3D shim) when available.
+
+2. ADD RAYS BATCH (add_rays_batch)
+   INPUT: List of (origin, direction, intensity) tuples
+   PROCESS:
+     - Process multiple rays efficiently
+   RESULT: Total cells updated
+
+3. DECAY (Cool down over time)
+   PROCESS:
+     - Multiply all heat values by decay_rate (e.g., 0.95)
+     - Age out contributor records (remove if older than ttl)
+     - Old data fades; single-camera artifacts expire
+   RESULT: Grid stays fresh
+
+4. GET HOT CELLS (get_hot_cells)
+   INPUT: Optional threshold, optional min_cameras
+   PROCESS:
+     - Find cells where heat > threshold
+     - AND distinct cameras in contributor map >= min_cameras
+   OUTPUT: List of HotCell objects with (x, y, heat, center_position)
+
+5. GET DETECTIONS (get_detections)
+   PROCESS:
+     - Get all verified hot cells
+     - Cluster nearby cells together
+     - Return center of each cluster
+   OUTPUT: List of 2D positions [x, y]
+   USE: Feed these to the Tracker
+
+6. GET STATS (get_stats)
+   OUTPUT: Stats dictionary
+     - dimensions (X, Y)
+     - hot_count_heat_only (raw data)
+     - hot_count_verified (verified by multiple cameras)
+     - native_accel (True/False)
+
+--------------------------------------------------------------------------------
+NATIVE ACCELERATION (3D Shim)
+--------------------------------------------------------------------------------
+
+The 2D grid uses the 3D native module via a "Shim":
+1. Expand 2D grid to a 1-layer 3D grid
+2. Run ultra-fast C++ ray marching
+3. Copy results back to 2D grid
+This provides ~10x speedup even for 2D calculations.
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Multi-camera verification (Ghost-track prevention) is critical for accuracy
+- 2D projection simplifies the tracking problem significantly
+- Native acceleration ensures we can handle high frame rates from many cameras
+- Decay and contributor aging keep the map accurate in real-time
+

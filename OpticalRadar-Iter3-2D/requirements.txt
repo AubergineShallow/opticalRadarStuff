@@ -1,0 +1,22 @@
+# OpticalRadar-Iter3 Dependencies
+# ================================
+# Install with: pip install -r requirements.txt
+
+# Core dependencies (required for all components)
+numpy>=1.20.0
+PyYAML>=5.4
+
+# Server dependencies
+scipy>=1.7.0          # For Hungarian algorithm in data association
+matplotlib>=3.4.0     # For visualization (optional if running headless)
+websockets>=10.0      # For broadcasting state to Frontend UI
+
+# Raspberry Pi node dependencies (only needed on RPi)
+# pyserial>=3.5       # For GPS UART communication
+# smbus2>=0.4.0       # For I2C IMU communication
+
+# Native acceleration (optional, for performance)
+# pybind11>=2.6.0     # Only needed if building native C++ module
+
+# Development dependencies (optional)
+# pytest>=6.0.0       # For running tests

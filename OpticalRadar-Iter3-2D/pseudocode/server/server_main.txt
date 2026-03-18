@@ -1,0 +1,100 @@
+FILE: server_main.py
+PURPOSE: The main program that orchestrates Tracking, Monitoring, and Calibration (2D Fork).
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This module is the brain of the system. It receives signed camera data,
+projects it onto a 2D ground map, tracks objects, and automatically calibrates 
+camera errors.
+
+Ghost-track prevention: It now passes the source camera ID to the grid so the system 
+can verify that multiple different cameras see the same thing before creating a track.
+
+--------------------------------------------------------------------------------
+COMPONENTS IT USES
+--------------------------------------------------------------------------------
+
+1. CORE: Voxel Grid (2D), Ray Builder
+2. TRACKING: Tracker (Kalman Filter), Track Manager
+3. MONITORING: Node Health, Metrics, Logger
+4. SECURITY: Authenticator
+5. CALIBRATION: Calibrator (Self-correcting orientations)
+
+--------------------------------------------------------------------------------
+STARTUP SEQUENCE
+--------------------------------------------------------------------------------
+
+1. SETUP CONFIG & LOGGING
+   - Load config and Shared Secret Keys.
+
+2. SETUP SUBSYSTEMS
+   - create VoxelGrid(200m x 200m 2D area)
+   - create Tracker (2D positions + 2D velocity)
+   - create NodeHealthMonitor
+   - create Calibrator
+
+3. START NETWORKING
+   - Init UDPServer(port=5005) with 4-layer pre-filtering.
+   - Init WebSocketBroadcaster(port=5000) for UI communication.
+
+--------------------------------------------------------------------------------
+MAIN LOOP (runs forever)
+--------------------------------------------------------------------------------
+
+EVERY FRAME (0.033s):
+
+  1. VOXEL UPDATE
+     - grid.decay()  # Age out old heat AND old contributors
+     
+     - FOR EACH packet in udp_server.get_packets():
+         # 1. Update node health stats
+         node_health.record_packet(packet.camera_id, ...)
+         
+         # 2. Build 2D rays from packet data
+         rays = ray_builder.build_rays_from_packet(packet)
+         
+         # 3. Add ALL rays to grid with SOURCE CAMERA information
+         FOR ray in rays:
+             grid.add_ray(ray.origin, ray.direction, ray.intensity, 
+                          camera_id=packet.camera_id)
+     
+  2. TRACKING UPDATE
+     - detections = grid.get_detections() # ONLY returns cells verified by 2+ cameras
+     - result = tracker.update(detections)
+     - active_tracks = tracker.get_confirmed_tracks()
+
+  3. SELF-CALIBRATION (The "Auto-Tune")
+     # We only calibrate against CONFIRMED tracks to avoid noise.
+     - IF active_tracks exist:
+         FOR ray in recent_rays:
+             best_position = _find_best_matching_cell(ray, active_tracks)
+             IF found:
+                 calibrator.add_observation(camera_id, ray, best_position)
+     
+     - Apply corrections from calibrator back to the Ray Builder.
+
+  4. VISUALIZATION & BROADCAST
+     - Update UI state via WebSockets:
+       - "SYSTEM_STATUS": metrics + verified hot cell count (hot_count_verified)
+       - "TRACK_UPDATE": active 2D tracks [ID, X, Y, VX, VY]
+       - "NODE_UPDATE": status of all cameras (connected/disconnected)
+
+--------------------------------------------------------------------------------
+HELPER FUNCTION: _find_best_matching_cell
+--------------------------------------------------------------------------------
+PURPOSE: Associate a camera's ray with the track position it most likely detected.
+
+ALGORITHM:
+  1. Calculate distance from track position [x,y] to the ray line in 2D.
+  2. Ensure the track is "in front" of the camera.
+  3. Return the track position if distance is small (e.g. < 5 meters).
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+The server ensures system integrity through security (HMAC), reliability 
+(NodeHealth), and accuracy (Self-calibration). The 2D simplification and 
+ghost-track logic provide a stable foundation for robot navigation and 
+security monitoring.

@@ -1,0 +1,71 @@
+FILE: gps.py
+PURPOSE: Read the GPS location of the Raspberry Pi camera.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This file reads GPS data from a satellite receiver to know exactly where
+the camera is located on Earth.
+
+--------------------------------------------------------------------------------
+THE SENSOR
+--------------------------------------------------------------------------------
+
+- Connected via serial port (like an old-fashioned phone line)
+- Speaks NMEA protocol (a standard GPS language)
+- Provides: Latitude, Longitude, Altitude
+- Updates: Once per second
+
+--------------------------------------------------------------------------------
+NMEA SENTENCE FORMAT
+--------------------------------------------------------------------------------
+
+The GPS sends text like this:
+  $GPGGA,123519,4807.038,N,01131.000,E,1,08,0.9,545.4,M,47.0,M,,*47
+
+Translation:
+  - $GPGGA = "This is a position report"
+  - 123519 = Time (12:35:19)
+  - 4807.038,N = Latitude 48° 07.038' North
+  - 01131.000,E = Longitude 11° 31.000' East
+  - 545.4,M = Altitude 545.4 meters
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. SETUP
+   - Try to open the serial port
+   - If it fails, work in "dummy mode" (return zeros)
+   - Store location as zeros initially
+
+2. UPDATE (call frequently)
+   - Read a line from the GPS
+   - Check if it starts with "$GPGGA"
+   - If yes, parse the fields:
+     
+     LATITUDE:
+       - Take the number (like 4807.038)
+       - First 2 digits = degrees (48)
+       - Rest = minutes (07.038)
+       - Convert: 48 + 7.038/60 = 48.1173°
+       - If "S" (South), make it negative
+     
+     LONGITUDE:
+       - Same process
+       - If "W" (West), make it negative
+     
+     ALTITUDE:
+       - Just read the number in meters
+
+3. POSITION (property)
+   - Return the most recent: (latitude, longitude, altitude)
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- The server needs to know where each camera is
+- GPS provides absolute position anywhere on Earth
+- Combined with other cameras' GPS, allows 3D triangulation

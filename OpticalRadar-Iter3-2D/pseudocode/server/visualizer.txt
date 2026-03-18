@@ -1,0 +1,56 @@
+FILE: visualizer.py
+PURPOSE: Show a 3D picture of detected objects on screen.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This file creates a live 3D display showing where objects are in the sky.
+It's like a radar screen but in 3D.
+
+--------------------------------------------------------------------------------
+THE DISPLAY
+--------------------------------------------------------------------------------
+
+- Shows a 3D box representing the monitored airspace
+- Red dots appear where objects are detected
+- Updates many times per second (live view)
+- You can rotate the view with your mouse
+
+AXES:
+- X = East-West (left-right)
+- Y = North-South (forward-back)
+- Z = Up-Down (altitude)
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. SETUP
+   - Create a new window
+   - Set up a 3D plot area
+   - Set the title to "Real-Time Voxel Airspace"
+   - Optionally connect keyboard shortcuts
+
+2. UPDATE
+   INPUT: Lists of X, Y, Z positions
+   PROCESS:
+     - Clear the old picture
+     - Set the viewing boundaries
+     - Label the axes (East, North, Up)
+     - If there are any points:
+       - Draw red squares at each position
+     - The display now shows the new data
+
+3. PAUSE
+   - Wait a short time (0.1 seconds)
+   - Let the display update on screen
+   - Handle any mouse/keyboard input
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Operators need to see what the system detects
+- Visual confirmation that everything is working
+- Easy to spot problems (no dots = no detections)

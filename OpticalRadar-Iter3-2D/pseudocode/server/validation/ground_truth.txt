@@ -1,0 +1,283 @@
+FILE: ground_truth.py
+PURPOSE: Compare system detections against known reference positions.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This tracks known object positions (ground truth) and compares them against
+what the system actually detects. Essential for validation and testing.
+
+Think of it as an "answer key" for the system.
+
+--------------------------------------------------------------------------------
+GROUND TRUTH SOURCES
+--------------------------------------------------------------------------------
+
+SOURCE 1: SIMULATION MODE
+  - Simulator reports exact target positions
+  - Server receives both detections AND true positions
+  - Perfect ground truth
+
+SOURCE 2: FIXED LANDMARKS
+  - Physical markers at known GPS coordinates
+  - Tall poles, buildings, towers
+  - Static references for calibration
+
+SOURCE 3: EXTERNAL TRACKING SYSTEMS
+  - ADS-B for aircraft (real flight data)
+  - Radar data feed
+  - Other sensors
+
+--------------------------------------------------------------------------------
+STORED DATA
+--------------------------------------------------------------------------------
+
+GROUND TRUTH ENTRY:
+  - Object ID
+  - True 3D position (X, Y, Z)
+  - Timestamp
+  - Source (simulation, landmark, external)
+  - Confidence level (0-1)
+
+EXAMPLE:
+```
+{
+  "object_id": "TARGET_1",
+  "position": [50.0, 75.0, 100.0],  # meters (E, N, U)
+  "timestamp": 1738123445.123,
+  "source": "simulation",
+  "confidence": 1.0
+}
+```
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. ADD GROUND TRUTH
+   INPUT: Object ID, position, timestamp, source
+   PROCESS:
+     - Store ground truth entry
+     - Index by timestamp for fast lookup
+   OUTPUT: Entry stored
+
+2. GET GROUND TRUTH AT TIME
+   INPUT: Timestamp, tolerance window
+   OUTPUT: All ground truth positions within time window
+   
+   EXAMPLE:
+   ```
+   # Get all known positions around time T
+   truth = ground_truth.get_at_time(T, tolerance=0.1)
+   # Returns positions within T ± 0.1 seconds
+   ```
+
+3. COMPARE DETECTION
+   INPUT: Detected position, timestamp
+   OUTPUT: Nearest ground truth + distance error
+   
+   PROCESS:
+     - Find ground truth entries near this timestamp
+     - For each ground truth:
+       - Calculate 3D distance to detection
+       - Track closest match
+     - Return best match and error
+   
+   EXAMPLE:
+   ```
+   detected = [51.2, 74.8, 99.5]
+   truth, error = ground_truth.compare_detection(detected, timestamp)
+   # truth = [50.0, 75.0, 100.0]
+   # error = 1.7 meters
+   ```
+
+4. BATCH EVALUATE
+   INPUT: List of detections with timestamps
+   OUTPUT: Match statistics
+   
+   STATISTICS:
+     - Mean error
+     - Standard deviation
+     - Max error
+     - Min error
+     - Match rate (% of ground truth objects detected)
+     - False positive rate (detections with no ground truth)
+   
+   EXAMPLE OUTPUT:
+   ```
+   {
+     "mean_error": 2.3,
+     "std_error": 1.1,
+     "max_error": 5.8,
+     "min_error": 0.2,
+     "match_rate": 0.95,  # 95% of true objects detected
+     "false_positive_rate": 0.08  # 8% phantom detections
+   }
+   ```
+
+5. TRACK OVER TIME
+   INPUT: Track (list of detections over time)
+   OUTPUT: Error trajectory
+   
+   PROCESS:
+     - For each detection in track:
+       - Compare to ground truth at that time
+       - Record error
+     - Plot error over time
+     - Detect trends (error increasing/decreasing)
+
+6. GENERATE ACCURACY REPORT
+   OUTPUT: Human-readable accuracy assessment
+   
+   EXAMPLE:
+   ```
+   Ground Truth Validation Report
+   ===============================
+   
+   Time Period: 2026-01-29 10:00 - 10:30
+   Ground Truth Sources: Simulation
+   Total Known Objects: 25
+   
+   DETECTION PERFORMANCE:
+   - Objects Detected: 24 / 25 (96%)
+   - Missed Detections: 1
+   - False Positives: 2
+   
+   POSITION ACCURACY:
+   - Mean Error: 2.1m
+   - Std Dev: 0.8m
+   - 95th Percentile: 3.5m
+   - 99th Percentile: 4.2m
+   
+   RATING: EXCELLENT (errors < 5m)
+   
+   DETAILS:
+   Object TARGET_1: 1.8m error (GOOD)
+   Object TARGET_2: 2.3m error (GOOD)
+   Object TARGET_3: NOT DETECTED ⚠️
+   Object TARGET_4: 4.1m error (ACCEPTABLE)
+   ...
+   ```
+
+7. ENABLE SIMULATION MODE
+   PROCESS:
+     - Connect to simulator
+     - Receive ground truth updates
+     - Automatically populate ground truth database
+   
+   INTEGRATION:
+   ```
+   # Simulator sends both telemetry and ground truth
+   sim_node.send_telemetry(camera_data)
+   sim_node.send_ground_truth(true_positions)
+   
+   # Server receives both
+   server.process_telemetry(camera_data)
+   ground_truth.add_from_simulation(true_positions)
+   ```
+
+8. REGISTER LANDMARK
+   INPUT: Name, GPS position, description
+   PROCESS:
+     - Convert GPS to local ENU coordinates
+     - Store as static ground truth
+     - Mark as "landmark" type
+   
+   EXAMPLE:
+   ```
+   ground_truth.register_landmark(
+       name="Water Tower",
+       lat=37.7749, lon=-122.4194, alt=50.0,
+       description="Tall water tower visible from all cameras"
+   )
+   ```
+
+9. IMPORT EXTERNAL DATA
+   INPUT: External tracking source (ADS-B, radar)
+   PROCESS:
+     - Parse external data format
+     - Convert to local coordinates
+     - Add as ground truth with source attribution
+   
+   EXAMPLE:
+   ```
+   # Import ADS-B aircraft positions
+   ground_truth.import_adsb("adsb_feed.json")
+   ```
+
+--------------------------------------------------------------------------------
+VALIDATION WORKFLOW
+--------------------------------------------------------------------------------
+
+DEVELOPMENT/TESTING:
+  1. Run system in simulation mode
+  2. Simulator provides ground truth
+  3. Every frame:
+     - Compare detections vs ground truth
+     - Log errors
+     - Alert if error exceeds threshold
+  4. Periodically generate accuracy report
+
+PRODUCTION WITH LANDMARKS:
+  1. Deploy cameras
+  2. Register known landmarks
+  3. System should always detect landmarks
+  4. Compare landmark detections vs true positions
+  5. If errors increase → calibration drift detected
+
+PRODUCTION WITH EXTERNAL DATA:
+  1. Import ADS-B aircraft data
+  2. Compare detected aircraft vs ADS-B positions
+  3. Statistical validation over time
+  4. Accounts for latency and update rates
+
+--------------------------------------------------------------------------------
+INTEGRATION WITH CALIBRATION
+--------------------------------------------------------------------------------
+
+GROUND TRUTH AIDS CALIBRATION:
+  - Calibration validator uses ground truth to measure quality
+  - If ground truth available, use it directly
+  - More reliable than just inter-camera consistency
+
+CALIBRATION WORKFLOW WITH GROUND TRUTH:
+  ```
+  1. System detects objects
+  2. Compare to ground truth → measure error
+  3. Pass error to calibration as weighted observation
+  4. Calibration adjusts to minimize ground truth error
+  5. Repeat until error < threshold
+  ```
+
+================================================================================
+SIMULATOR INTEGRATION
+================================================================================
+
+sim_node.py CHANGES:
+  - After calculating target positions
+  - Send ground truth packet to server
+  - Format: same as telemetry but flagged as ground truth
+
+protocol.py CHANGES:
+  - Add GROUND_TRUTH packet type
+  - Contains object IDs + true positions
+  - Server accumulates for validation
+
+server_main.py CHANGES:
+  - When ground truth packet received:
+    - Extract true positions
+    - Pass to ground_truth.add_from_simulation()
+  - Periodically run validation
+  - Display accuracy in visualizer
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Only way to measure true system accuracy
+- Essential for development and testing
+- Validates calibration is working
+- Detects degradation over time
+- Builds confidence in production deployment
+- Required for certification/compliance

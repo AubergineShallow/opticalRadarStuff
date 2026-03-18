@@ -1,0 +1,69 @@
+FILE: node.py (RPi)
+PURPOSE: Smart Camera Node with Security and Clock Synchronization.
+
+================================================================================
+WHAT THIS FILE DOES
+================================================================================
+The Camera Code handles sensor acquisition, signs its messages for security,
+and ensures its internal clock is correct before sending data to the server.
+
+--------------------------------------------------------------------------------
+STARTUP SEQUENCE
+--------------------------------------------------------------------------------
+
+1. CLOCK SANITY CHECK (NTP Wait)
+   - Read system time.
+   - IF time is before 2024-01-01 (typical for RPi boot without RTC):
+     - LOG Warning: Clock invalid.
+     - LOOP for 30 seconds:
+       - Wait 1s.
+       - Re-check time.
+       - BREAK if time becomes valid (> 2024).
+     - IF still invalid after 30s:
+       - PROCEED with warning (Server will likely reject packets).
+
+2. START SENSORS
+   - Initialize Vision system (Camera).
+   - Initialize GPSReader.
+   - Initialize IMUReader.
+
+3. INITIAL ANNOUNCEMENT
+   - Send 3 UDP "Announce" packets (Config: Camera ID, FOV, Resolution).
+   - Wait 100ms between each.
+
+--------------------------------------------------------------------------------
+MAIN LOOP (runs forever)
+--------------------------------------------------------------------------------
+
+FOREVER:
+  1. ACQUIRE DATA
+     - Image -> Vision (Rectilinear azimuth, Elevation=0.0)
+     - GPS -> Latitude, Longitude
+     - IMU -> Orientation Quaternion
+
+  2. BUILD PACKET (Protocol V3)
+     - Increment SEQUENCE_NUMBER
+     - Header: [Ver=3, ID, Timestamp, Seq, Loc, Orient, Flags]
+     - Body: [MotionVectors]
+
+  3. SECURITY SIGNING
+     - signature = HMAC(SHARED_KEY, Header + Body)
+     - final_packet = Header + Body + signature
+
+  4. TRANSMIT
+     - Send final_packet via UDP to Server.
+
+  5. SLEEP (Maintain 30 FPS target)
+
+--------------------------------------------------------------------------------
+CONFIGURATION
+--------------------------------------------------------------------------------
+- Needs: SERVER_IP, SERVER_PORT, NODE_ID, SHARED_SECRET_KEY
+- FOV Config: 62.2 (H), 48.8 (V)
+
+================================================================================
+IMPACT
+================================================================================
+- Secure: HMAC signature prevents spoofing.
+- Synchronized: NTP check ensures server won't reject valid telemetry.
+- Consistent: 2D geometry (zero elevation) aligns with server's ground grid.

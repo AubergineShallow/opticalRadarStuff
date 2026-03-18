@@ -1,0 +1,8 @@
+[0:26:46.447183441] [2412]  INFO Camera camera_manager.cpp:293 libcamera v0.0.0+3384-44d59841
+[0:26:46.461867501] [2413] ERROR CameraSensor camera_sensor.cpp:535 'ov5647 10-0036': Camera sensor does not support test pattern modes.
+[0:26:46.481541586] [2413]  INFO RPI raspberrypi.cpp:1313 Registered camera /base/soc/i2c0mux/i2c@1/ov5647@36 to Unicam device /dev/media0 and ISP device /dev/media2
+Available cameras
+-----------------
+0 : ov5647 [2592x1944] (/base/soc/i2c0mux/i2c@1/ov5647@36)
+    Modes: 'SGBRG10_CSI2P' : 640x480 1296x972 1920x1080 2592x1944 
+           'SGBRG8' : 640x480 

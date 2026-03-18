@@ -1,0 +1,5 @@
+{
+  "name": "Optical Radar CIC - Indoor",
+  "description": "Indoor tracking dashboard visualizing people positioning within a room using optical sensors.",
+  "requestFramePermissions": []
+}

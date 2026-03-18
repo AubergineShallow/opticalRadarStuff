@@ -1,0 +1,128 @@
+================================================================================
+OPTICALRADAR PHASE 1 REVAMP - FOLDER STRUCTURE
+================================================================================
+PURPOSE: Production readiness with monitoring, security, tracking, and validation
+
+================================================================================
+NEW FOLDER TREE STRUCTURE
+================================================================================
+
+pseudocode/
+│
+├── common/                          [EXISTING - MODIFIED]
+│   ├── constants.txt                [MODIFIED] - Now loads from config files
+│   ├── protocol.txt                 [MODIFIED] - Add sequence numbers, signatures
+│   └── config.txt                   [NEW] - Configuration management
+│
+├── math_utils/                      [EXISTING - RENAMED]
+│   ├── geo.txt                      (Renamed from math/ to avoid Python builtin conflict)
+│   └── quaternion.txt
+│
+├── rpi/                             [EXISTING - MODIFIED]
+│   ├── rpi_node.txt                 [MODIFIED] - Add sequence numbers, heartbeat
+│   ├── vision.txt                   [MODIFIED] - Add environmental adaptation
+│   ├── gps.txt
+│   └── imu.txt
+│
+├── esp32/                           [EXISTING - MODIFIED]
+│   └── esp32_main.txt               [MODIFIED] - Add sequence numbers, heartbeat
+│
+├── server/                          [EXISTING - MODIFIED]
+│   ├── server_main.txt              [MODIFIED] - Integrate new subsystems
+│   ├── calibration.txt              [MODIFIED] - Add validation hooks
+│   ├── ray_builder.txt
+│   ├── udp_server.txt               [MODIFIED] - Add sequence tracking, health monitor
+│   ├── visualizer.txt               [MODIFIED] - Show tracks, not just detections
+│   ├── voxel_grid.txt
+│   │
+│   ├── tracking/                    [NEW SUBSYSTEM]
+│   │   ├── tracker.txt              [NEW] - Main tracking coordinator
+│   │   ├── kalman_filter.txt        [NEW] - State estimation for objects
+│   │   ├── data_association.txt     [NEW] - Match detections to tracks
+│   │   └── track_manager.txt        [NEW] - Track lifecycle management
+│   │
+│   ├── monitoring/                  [NEW SUBSYSTEM]
+│   │   ├── node_health.txt          [NEW] - Camera health tracking
+│   │   ├── metrics.txt              [NEW] - Performance metrics collection
+│   │   └── logger.txt               [NEW] - Structured logging
+│   │
+│   ├── validation/                  [NEW SUBSYSTEM]
+│   │   ├── calibration_validator.txt [NEW] - Validate calibration quality
+│   │   └── ground_truth.txt         [NEW] - Compare against known references
+│   │
+│   └── security/                    [NEW SUBSYSTEM]
+│       ├── authenticator.txt        [NEW] - HMAC signing/verification
+│       └── key_manager.txt          [NEW] - Shared secret management
+│
+├── simulation/                      [EXISTING - MODIFIED]
+│   ├── sim_node.txt                 [MODIFIED] - Add ground truth reporting
+│   └── sim_utils.txt
+│
+└── native/                          [EXISTING - UNCHANGED]
+    ├── native_setup.txt
+    └── process_image_cpp.txt
+
+================================================================================
+MODULE SUMMARY
+================================================================================
+
+EXISTING MODULES:     19 files
+NEW MODULES:          12 files
+MODIFIED MODULES:     8 files
+TOTAL MODULES:        31 files
+
+================================================================================
+NEW SUBSYSTEMS OVERVIEW
+================================================================================
+
+1. TRACKING SUBSYSTEM (4 modules)
+   - Converts voxel detections into persistent tracked objects
+   - Maintains object identity across frames
+   - Estimates velocity and trajectory
+
+2. MONITORING SUBSYSTEM (3 modules)
+   - Tracks camera health and connectivity
+   - Collects system performance metrics
+   - Provides structured logging for debugging
+
+3. VALIDATION SUBSYSTEM (2 modules)
+   - Validates calibration is improving, not degrading
+   - Compares detections against ground truth references
+   - Quality scoring and alerts
+
+4. SECURITY SUBSYSTEM (2 modules)
+   - HMAC-based message authentication
+   - Shared secret management
+   - Prevents spoofed telemetry packets
+
+5. CONFIGURATION SYSTEM (1 module)
+   - Centralized config file management
+   - Environment variable support
+   - Runtime reconfiguration capability
+
+================================================================================
+BACKWARD COMPATIBILITY
+================================================================================
+
+- Protocol changes are VERSION=3 (VERSION=2 still supported)
+- Tracking is optional (can run with raw detections)
+- Security can be disabled for testing
+- Monitoring is non-invasive (just observers)
+- Old cameras can still connect (receive warnings)
+
+================================================================================
+DEPLOYMENT NOTES
+================================================================================
+
+MINIMAL DEPLOYMENT (Testing):
+  - Use existing modules + config system
+  - No security, no tracking
+  - Monitoring optional
+
+PRODUCTION DEPLOYMENT:
+  - All subsystems enabled
+  - Security required
+  - Tracking required
+  - Full monitoring/logging
+
+================================================================================

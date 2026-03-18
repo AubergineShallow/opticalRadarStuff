@@ -1,0 +1,69 @@
+FILE: udp_server.py
+PURPOSE: Efficiently and securely receive packets with DoS protection.
+
+================================================================================
+WHAT THIS FILE DOES
+================================================================================
+The "Mailroom" is now a high-security checkpoint with four layers of filtering.
+1. Size Guard: Rejects impossible packets immediately.
+2. Version Inspector: Ensures the protocol matches.
+3. Rate Limiter: Rejects floods from a single IP.
+4. Security Guard: Checks HMAC signatures (Authenticator).
+
+--------------------------------------------------------------------------------
+FUNCTIONS
+--------------------------------------------------------------------------------
+
+1. INITIALIZATION
+   - Bind Port 5005
+   - RATE_LIMIT: 200 packets per second per IP
+   - AUTHENTICATOR: For signature verification
+
+2. RECEIVE LOOP (Background Thread)
+   - Wait for data on socket
+   - On data: _process_packet(data, addr)
+
+3. PROCESS PACKET (The Filter Pipeline)
+   INPUT: Raw Bytes, Sender IP
+   
+   LAYER 1: SIZE CHECK (Free)
+     - IF data is too small (header missing) or too large (MTU exceeded):
+       - REJECT & LOG
+   
+   LAYER 2: VERSION CHECK (Free)
+     - IF data[0] != PROTOCOL_VERSION:
+       - REJECT & LOG (Prevents mixed-version bugs)
+
+   LAYER 3: RATE LIMITING (Fast)
+     - Check dict: {IP: [count, last_timestamp]}
+     - IF more than 200 packets in the last 1.0 second:
+       - REJECT & increment rate_limited_stat
+   
+   LAYER 4: AUTHENTICATOR (Expensive HMAC)
+     - ONLY run this if layers 1-3 pass!
+     - Compute HMAC-SHA256 signature
+     - IF signature mismatch:
+       - REJECT & increment auth_failures_stat
+     
+     - UNPACK packet data
+     - CHECK TIMESTAMP drift (Replay protection)
+     - IF drift > 30s:
+       - REJECT
+
+   LAYER 5: QUEUEING
+     - Place fully verified packet objects into the shared queue for the Main Loop.
+
+--------------------------------------------------------------------------------
+ERROR HANDLING
+--------------------------------------------------------------------------------
+
+- FLOOD ATTACK: Rate limiter drops packets before CPU-intensive HMAC runs.
+- MALFORMED: Size/Version checks drop garbage early.
+- AUTH FAILURE: Logged separately to detect key leaks or spoofing attempts.
+
+===============================================================================
+IMPACT
+================================================================================
+- Robust: Resists UDP flood attacks and accidental data bursts.
+- Secure: Guarantees that only signed telemetry from known nodes is tracked.
+- Efficient: Discards invalid data with minimum CPU effort.

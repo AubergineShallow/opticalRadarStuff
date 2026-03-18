@@ -1,0 +1,76 @@
+﻿python : [10:27:07] [INFO ] [system      ] Initializing 
+OpticalRadar server 
+At line:1 char:32
++ ... NG='utf-8'; python "c:\Users\Pre-Installed 
+User\Desktop\OpticalRadar- ...
++                 
+~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+    + CategoryInfo          : NotSpecified: ([10:27:07] [INF...alR 
+   adar server :String) [], RemoteException
+    + FullyQualifiedErrorId : NativeCommandError
+ 
+[10:27:07] [WARNING] [security    ] Auth disabled: Key file not 
+found: secrets/shared.key 
+[10:27:07] [INFO ] [system      ] WebSocket server initialized 
+[10:27:07] [INFO ] [system      ] Initializing OpticalRadar server 
+[10:27:07] [WARNING] [security    ] Auth disabled: Key file not 
+found: secrets/shared.key 
+[10:27:07] [INFO ] [system      ] WebSocket server initialized 
+============================================================
+OpticalRadar-Iter3 Full System Orchestration Test
+============================================================
+
+=== Phase 1: Import Verification ===
+  [PASS] common.constants
+  [PASS] common.config
+  [PASS] common.protocol
+  [PASS] math_utils.geo
+  [PASS] math_utils.quaternion
+  [PASS] server.udp_server
+  [PASS] server.ray_builder
+Native C++ module not available, using Python fallback
+  [PASS] server.voxel_grid
+  [PASS] server.calibration
+  [PASS] server.websocket_server
+  [PASS] server.tracking.tracker
+  [PASS] server.tracking.kalman_filter
+  [PASS] server.tracking.data_association
+  [PASS] server.tracking.track_manager
+  [PASS] server.monitoring.node_health
+  [PASS] server.security.authenticator
+  [PASS] server.validation.ground_truth
+  [PASS] server.validation.calibration_validator
+  [PASS] server.server_main
+  [PASS] simulation.sim_node
+  [PASS] simulation.sim_utils
+
+=== Phase 2: Protocol Round-Trip ===
+  [PASS] Telemetry pack/unpack (2 vectors)
+  [PASS] Command pack/unpack
+  [PASS] Header size == 61 (uint16 vector_count)
+  [PASS] 300 vectors (exceeds old uint8 limit)
+
+=== Phase 3: Config ===
+  [PASS] Config has GPS/IMU sections with defaults
+
+=== Phase 4: Voxel Grid ===
+  [PASS] Grid lifecycle: add_ray -> get_stats -> decay -> get_detections
+
+=== Phase 5: Calibration ===
+  [PASS] Calibration solver (gradient descent)
+
+=== Phase 6: Tracker ===
+  [PASS] Tracker: 10-frame update cycle
+
+=== Phase 7: Server Initialization ===
+  [PASS] Server init (headless, all subsystems present)
+
+=== Phase 8: Server Frame Processing ===
+  [PASS] 5-frame processing cycle (no network)
+
+=== Phase 9: Simulation ΓåÆ Server Pipeline ===
+  [PASS] SimNode detect_targets (no crash)
+
+============================================================
+Results: 32 passed, 0 failed (32 total)
+============================================================

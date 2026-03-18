@@ -1,0 +1,7 @@
+﻿[0:17:14.963932085] [1321] [1;32m INFO [1;37mCamera [1;34mcamera_manager.cpp:297 [0mlibcamera v0.0.5+83-bde9b04f
+[0:17:15.004915455] [1330] [1;32m INFO [1;37mRPI [1;34mvc4.cpp:437 [0mRegistered camera /base/soc/i2c0mux/i2c@1/ov5647@36 to Unicam device /dev/media1 and ISP device /dev/media2
+[0:17:15.005002918] [1330] [1;32m INFO [1;37mRPI [1;34mpipeline_base.cpp:1101 [0mUsing configuration file '/usr/share/libcamera/pipeline/rpi/vc4/rpi_apps.yaml'
+[0:17:15.016018159] [1321] [1;32m INFO [1;37mCamera [1;34mcamera.cpp:1033 [0mconfiguring streams: (0) 640x480-RGB888 (1) 640x480-SGBRG10_CSI2P
+[0:17:15.018007251] [1330] [1;31mERROR [1;37mV4L2 [1;34mv4l2_videodevice.cpp:1047 [0;32m/dev/video0[15:cap]: [0mUnable to set format: Device or resource busy
+Initializing Camera...
+Failed to start camera: Failed to configure camera: Device or resource busy

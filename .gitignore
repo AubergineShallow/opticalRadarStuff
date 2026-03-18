@@ -1,0 +1,6 @@
+code.zip
+temp_code/
+*.log
+__pycache__/
+node_modules/
+.env

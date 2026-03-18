@@ -1,0 +1,72 @@
+FILE: vision.py
+PURPOSE: Detect moving objects in the camera video and report angles.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This file watches the camera video and finds things that are moving.
+It calculates the exact angle (azimuth) from the camera to the moving object.
+
+--------------------------------------------------------------------------------
+HOW MOTION DETECTION WORKS
+--------------------------------------------------------------------------------
+
+1. BACKGROUND MODEL
+   - Compare each new frame to the background (simple frame differencing)
+   - Anything different = motion
+
+2. FOREGROUND EXTRACTION
+   - Result: A black and white mask (white = motion, black = static)
+
+3. CLEANUP
+   - Remove noise (tiny random changes) via Gaussian blur and thresholding
+   
+4. FIND BLOBS
+   - Group connected white pixels into contours
+   - Calculate the center and area of each contour
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. SETUP
+   - Open the camera (e.g. 640 x 480 resolution)
+   - Set motion thresholds
+
+2. DETECT MOTION
+   INPUT: One camera frame
+   PROCESS:
+     - Convert to grayscale 
+     - Apply frame differencing
+     - Find outlines of moving things (contours)
+      
+     FOR EACH CONTOUR:
+       - Calculate area
+       - If too small, ignore
+       - Calculate center pixel (cx, cy)
+       - Convert pixel position to angles using RECTILINEAR PROJECTION:
+         * Azimuth = atan(nx * 2 * tan(horizontal_fov / 2))
+         * Elevation = 0.0 (Hardcoded for 2D ground plane)
+       - Create a MotionVector with (Azimuth, Elevation=0.0, Intensity)
+   
+   OUTPUT: List of MotionVectors
+
+--------------------------------------------------------------------------------
+CAMERA PROJECTION (2D Fork Accuracy)
+--------------------------------------------------------------------------------
+
+The node uses a RECTILINEAR (pinhole) model for better accuracy:
+- Azimuth 0 is the center of the frame.
+- Pixels at the edges are corrected for lens geometry (atan correction).
+- Horizontal FOV: 62.2 degrees
+- Vertical FOV: 48.8 degrees
+- Elevation is ALWAYS reported as 0.0 to stay consistent with the 2D tracking.
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Pinhole camera math (rectilinear) prevents distortion at frame edges.
+- High-speed motion detection keeps tracking smooth.
+- 2D simplification (zero elevation) makes multi-camera intersection much faster.

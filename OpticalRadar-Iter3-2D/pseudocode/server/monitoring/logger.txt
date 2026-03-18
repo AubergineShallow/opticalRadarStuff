@@ -1,0 +1,240 @@
+FILE: logger.py
+PURPOSE: Structured logging for the entire system.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This creates a unified logging system with different levels of importance,
+structured data, and multiple output destinations.
+
+Think of it like a "flight recorder" that captures everything happening.
+
+--------------------------------------------------------------------------------
+LOG LEVELS
+--------------------------------------------------------------------------------
+
+DEBUG:
+  - Detailed diagnostic information
+  - Only in development or troubleshooting
+  - Example: "Received packet: {packet_data}"
+
+INFO:
+  - Normal operational messages
+  - Confirmation things are working
+  - Example: "Camera RPI1 connected"
+
+WARNING:
+  - Something unexpected but not critical
+  - System continues normally
+  - Example: "Packet loss detected from RPI3: 15%"
+
+ERROR:
+  - Significant problem occurred
+  - Functionality degraded
+  - Example: "Failed to decode packet from RPI5"
+
+CRITICAL:
+  - Severe problem
+  - System may fail
+  - Example: "Voxel grid memory allocation failed"
+
+--------------------------------------------------------------------------------
+STRUCTURED LOGGING
+--------------------------------------------------------------------------------
+
+Instead of plain text:
+  ❌ "Camera RPI1 sent 5 detections at 10:30:45"
+
+Use structured fields:
+  ✅ {
+       "timestamp": "2026-01-29T10:30:45Z",
+       "level": "INFO",
+       "component": "udp_server",
+       "camera_id": "RPI1",
+       "detection_count": 5,
+       "message": "Received telemetry packet"
+     }
+
+Benefits:
+  - Machine-readable
+  - Easy to search/filter
+  - Can aggregate by fields
+  - Works with log analysis tools
+
+--------------------------------------------------------------------------------
+LOG DESTINATIONS
+--------------------------------------------------------------------------------
+
+1. CONSOLE OUTPUT
+   - Human-readable format
+   - Color-coded by level
+   - Enabled for development
+
+2. FILE OUTPUT
+   - Rotating log files
+   - Keep last N days
+   - Structured JSON format
+
+3. SYSLOG (optional)
+   - System-wide logging service
+   - Centralized collection
+
+4. EXTERNAL SERVICES (optional)
+   - Elasticsearch/Logstash
+   - Splunk
+   - CloudWatch
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. CONFIGURE LOGGER
+   INPUT: Config settings (log level, destinations)
+   PROCESS:
+     - Set up handlers for each destination
+     - Configure formatters
+     - Set filters
+   OUTPUT: Logger ready to use
+
+2. LOG MESSAGE
+   INPUT: Level, component, message, context fields
+   PROCESS:
+     - Add timestamp
+     - Add component/module name
+     - Format according to destination
+     - Write to all enabled handlers
+   
+   EXAMPLES:
+   ```python
+   log.debug("tracker", "Creating new track", track_id=42)
+   log.info("udp_server", "Camera connected", camera_id="RPI1")
+   log.warning("calibration", "Low observation count", 
+               camera_id="RPI3", count=2)
+   log.error("voxel_grid", "Ray processing failed", 
+             error=str(e), ray_count=150)
+   log.critical("server_main", "System shutdown initiated")
+   ```
+
+3. LOG EVENT
+   INPUT: Event type, context
+   PROCESS: Log structured event (special case of log message)
+   
+   EXAMPLES:
+   ```python
+   log.event("camera_connected", camera_id="RPI1", ip="192.168.1.10")
+   log.event("detection", camera_id="RPI1", count=5, timestamp=now)
+   log.event("track_created", track_id=42, position=[10, 20, 30])
+   log.event("calibration_update", camera_id="RPI2", 
+             correction=[0.1, 0.2, 0.05, 0.98])
+   ```
+
+4. SET CONTEXT
+   INPUT: Persistent context fields
+   PROCESS: All future logs include these fields
+   
+   EXAMPLE:
+   ```python
+   log.set_context(node_id="RPI1", session_id="abc123")
+   # Now all logs automatically include node_id and session_id
+   ```
+
+5. QUERY LOGS
+   INPUT: Filter criteria, time range
+   OUTPUT: Matching log entries
+   
+   EXAMPLES:
+   ```python
+   # Find all errors from RPI1 in last hour
+   logs = log.query(level="ERROR", camera_id="RPI1", since="1h")
+   
+   # Find all calibration events
+   logs = log.query(component="calibration", event_type="calibration_update")
+   ```
+
+6. ROTATE LOGS
+   PROCESS:
+     - Close current log file
+     - Rename with timestamp
+     - Open new log file
+     - Delete old logs beyond retention
+   TRIGGER: Time-based or size-based
+
+--------------------------------------------------------------------------------
+LOG FORMAT EXAMPLES
+--------------------------------------------------------------------------------
+
+CONSOLE (Human-readable):
+```
+2026-01-29 10:30:45 [INFO] udp_server: Camera RPI1 connected from 192.168.1.10
+2026-01-29 10:30:47 [WARNING] calibration: Low observation count (camera=RPI3, count=2)
+2026-01-29 10:30:50 [ERROR] voxel_grid: Ray processing failed (rays=150, error=OutOfMemory)
+```
+
+FILE (JSON structured):
+```json
+{
+  "timestamp": "2026-01-29T10:30:45Z",
+  "level": "INFO",
+  "component": "udp_server",
+  "message": "Camera connected",
+  "camera_id": "RPI1",
+  "ip_address": "192.168.1.10"
+}
+```
+
+--------------------------------------------------------------------------------
+PERFORMANCE CONSIDERATIONS
+--------------------------------------------------------------------------------
+
+- Logging should not slow down main processing
+- Use async logging for file writes
+- Buffer logs in memory, flush periodically
+- Skip expensive operations at DEBUG level if disabled
+- Lazy evaluation of log messages
+
+Example:
+```python
+# Bad (always formats string, even if debug disabled)
+log.debug("voxel_grid", f"Processing {len(rays)} rays: {rays}")
+
+# Good (only formats if debug enabled)
+log.debug("voxel_grid", "Processing rays", ray_count=len(rays))
+```
+
+================================================================================
+INTEGRATION WITH SYSTEM
+================================================================================
+
+All modules should use logger:
+  - Replace print() statements
+  - Log important state changes
+  - Log errors with context
+  - Log performance milestones
+
+Example module integration:
+```python
+from monitoring import logger as log
+
+def process_telemetry(packet):
+    log.debug("udp_server", "Processing packet", 
+              camera_id=packet.node_id)
+    try:
+        result = decode(packet)
+        log.info("udp_server", "Packet decoded successfully",
+                 camera_id=packet.node_id, vectors=len(result.vectors))
+    except Exception as e:
+        log.error("udp_server", "Decode failed",
+                  camera_id=packet.node_id, error=str(e))
+```
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Debugging production issues without print statements
+- Security audit trail
+- Performance analysis
+- Operational monitoring
+- Post-mortem analysis after failures
+- Compliance requirements

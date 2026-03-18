@@ -1,0 +1,23 @@
+system:
+  version: 3
+  debug_mode: true
+  headless: true
+
+network:
+  server_ip: "0.0.0.0"
+  udp_port: 5005
+
+security:
+  enabled: false
+
+grid:
+  width_m: 200
+  depth_m: 200
+  resolution_m: 1.0
+  decay_rate: 0.95
+  hot_threshold: 5.0
+  min_cameras: 1  # Allow tracking from a single camera
+
+tracking:
+  min_hits_to_confirm: 3
+  max_misses_to_delete: 30

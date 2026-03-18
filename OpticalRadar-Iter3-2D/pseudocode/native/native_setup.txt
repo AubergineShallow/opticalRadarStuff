@@ -1,0 +1,68 @@
+FILE: setup.py (Native)
+PURPOSE: Instructions for building the C++ extension.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This file tells Python how to compile the C++ code into a module that
+Python can use. Think of it as a recipe for building the fast code.
+
+--------------------------------------------------------------------------------
+THE BUILD PROCESS
+--------------------------------------------------------------------------------
+
+1. FIND THE C++ FILE
+   - Look for process_image.cpp
+
+2. FIND PYBIND11
+   - This is a library that connects C++ to Python
+   - It creates the "bridge" between the two languages
+
+3. COMPILE
+   - Use the computer's C++ compiler
+   - Apply optimization flags (make it fast)
+   - Create a .pyd file (Python can load this)
+
+4. INSTALL
+   - Put the compiled file where Python can find it
+
+--------------------------------------------------------------------------------
+HOW TO BUILD
+--------------------------------------------------------------------------------
+
+Command: pip install ./dist_system/native
+
+Or manually:
+  cd dist_system/native
+  python setup.py build_ext --inplace
+
+--------------------------------------------------------------------------------
+REQUIREMENTS
+--------------------------------------------------------------------------------
+
+- Python 3.x
+- pybind11 library (pip install pybind11)
+- C++ compiler:
+  - Windows: Visual Studio or MSVC
+  - Mac: Xcode command line tools
+  - Linux: GCC
+
+--------------------------------------------------------------------------------
+IF BUILD FAILS
+--------------------------------------------------------------------------------
+
+- The Python fallback in voxel_grid.py will be used
+- System still works, just slower
+- Common reasons for failure:
+  - No C++ compiler installed
+  - Missing pybind11
+  - Path issues
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Enables the high-speed voxel processing
+- Without this, large deployments will lag
+- Only needs to be built once per machine

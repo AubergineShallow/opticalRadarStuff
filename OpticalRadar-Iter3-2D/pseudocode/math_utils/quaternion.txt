@@ -1,0 +1,62 @@
+FILE: quaternion.py
+PURPOSE: Math for describing rotations in 3D space.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This file handles all the math for rotations. 
+
+When you tilt your head, turn around, or roll over - those are rotations.
+Computers use 4 numbers (called a "quaternion") to describe any rotation.
+
+Think of it like: [how much to stay still, tilt left/right, tilt forward/back, spin]
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. NORMALIZE (make valid)
+   - Take any 4 numbers
+   - Adjust them so they represent a proper rotation
+   - Like adjusting a bent ruler to be straight again
+
+2. EULER TO QUATERNION (convert human angles)
+   - Take 3 simple angles (yaw, pitch, roll)
+     * Yaw = turning left/right like shaking head "no"
+     * Pitch = nodding up/down like shaking head "yes"  
+     * Roll = tilting sideways like touching ear to shoulder
+   - Convert to the 4-number format computers prefer
+
+3. MULTIPLY QUATERNIONS (combine rotations)
+   - Take two rotations
+   - Combine them into one rotation
+   - Like: first turn left 30°, then look up 10° = combined rotation
+
+4. INVERSE (undo a rotation)
+   - Take a rotation
+   - Find the opposite rotation
+   - If you turned left, this gives "turn right by same amount"
+
+5. MATRIX TO QUATERNION (convert from grid format)
+   - Take a 3x3 grid of numbers (another way to describe rotation)
+   - Convert to the 4-number format
+
+6. QUATERNION TO MATRIX (convert to grid format)
+   - Take the 4-number rotation
+   - Convert to a 3x3 grid format
+   - Useful for some calculations
+
+7. SLERP (smooth blending)
+   - Take two rotations
+   - Blend between them smoothly
+   - Like slowly turning your head from one position to another
+   - You give a percentage (0% = first position, 100% = second position)
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Cameras need to know which way they're pointing
+- The server needs to combine multiple camera views
+- Rotations must be precise to locate objects correctly

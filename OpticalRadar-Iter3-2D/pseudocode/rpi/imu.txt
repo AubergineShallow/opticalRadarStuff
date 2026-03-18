@@ -1,0 +1,60 @@
+FILE: imu.py
+PURPOSE: Read the tilt sensor on the Raspberry Pi camera.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+The Raspberry Pi has a sensor that knows which way it's tilted. This file
+reads that sensor and tells the rest of the system which way the camera
+is pointing.
+
+--------------------------------------------------------------------------------
+THE SENSOR
+--------------------------------------------------------------------------------
+
+- Name: BerryGPS-IMUv4 (IMU = Inertial Measurement Unit)
+- What it measures: Acceleration in 3 directions (X, Y, Z)
+- Using gravity: When still, the sensor feels Earth's pull
+- From gravity direction, we can calculate tilt
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. SETUP
+   - Check if the sensor hardware exists
+   - If yes, connect to it via I2C (a type of wire connection)
+   - Configure the sensor to start measuring
+   - If no sensor found, work in "dummy mode" (return default values)
+
+2. READ ACCELEROMETER
+   - Read 6 bytes from the sensor
+   - Combine them into 3 numbers: acceleration in X, Y, Z
+   - Return the raw numbers
+
+3. GET QUATERNION (get rotation as 4 numbers)
+   PROCESS:
+     - Read the accelerometer
+     - Calculate the magnitude (total acceleration)
+     - Normalize the values (make them relative)
+     - Calculate pitch: How much is the camera tilting forward/back?
+     - Calculate roll: How much is the camera tilting left/right?
+     - Convert these angles to a quaternion (4-number rotation)
+   OUTPUT: Rotation that describes camera orientation
+
+================================================================================
+LIMITATIONS
+================================================================================
+
+- Cannot measure yaw (compass direction) - only tilt
+- Acceleration from movement can confuse the readings
+- Works best when the camera is stationary
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- The server needs to know camera orientation
+- Without this, the system can't correctly place objects in 3D space
+- Even small tilt errors cause big positioning errors at distance

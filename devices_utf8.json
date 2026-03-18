@@ -1,0 +1,272 @@
+﻿[
+    {
+        "Name":  "TrackPoint Component",
+        "Description":  "TrackPoint Component",
+        "Manufacturer":  "ELAN",
+        "DeviceID":  "SWD\\DRIVERENUM\\EPD_COMPONENT\u00265\u002628E6C6DA\u00260"
+    },
+    {
+        "Name":  "Microsoft ACPI-Compliant Embedded Controller",
+        "Description":  "Microsoft ACPI-Compliant Embedded Controller",
+        "Manufacturer":  "(Standard system devices)",
+        "DeviceID":  "ACPI\\PNP0C09\\0"
+    },
+    {
+        "Name":  "Microsoft ACPI-Compliant Control Method Battery",
+        "Description":  "Microsoft ACPI-Compliant Control Method Battery",
+        "Manufacturer":  "Microsoft",
+        "DeviceID":  "ACPI\\PNP0C0A\\0"
+    },
+    {
+        "Name":  "HID-compliant touch pad",
+        "Description":  "HID-compliant touch pad",
+        "Manufacturer":  "(Standard system devices)",
+        "DeviceID":  "HID\\ELAN0676\u0026COL03\\5\u0026218C0298\u00260\u00260002"
+    },
+    {
+        "Name":  "USB4 Root Router (1.0)",
+        "Description":  "USB4 Root Router",
+        "Manufacturer":  "Generic USB4 Device Router",
+        "DeviceID":  "USB4\\ROOT_DEVICE_ROUTER\u0026VID_8086\u0026PID_A76D\\4\u0026B0A81B8\u00260\u00260"
+    },
+    {
+        "Name":  "USB Root Hub (USB 3.0)",
+        "Description":  "USB Root Hub (USB 3.0)",
+        "Manufacturer":  "(Standard USB HUBs)",
+        "DeviceID":  "USB\\ROOT_HUB30\\4\u00262CAD228D\u00260\u00260"
+    },
+    {
+        "Name":  "USB Input Device",
+        "Description":  "USB Input Device",
+        "Manufacturer":  "(Standard system devices)",
+        "DeviceID":  "USB\\VID_046D\u0026PID_C542\\5\u00262C15F40F\u00260\u00267"
+    },
+    {
+        "Name":  "Intel(R) Dynamic Tuning Technology Device Extension Component",
+        "Description":  "Intel(R) Dynamic Tuning Technology",
+        "Manufacturer":  "Intel",
+        "DeviceID":  "SWD\\DRIVERENUM\\{BC7814A1-A80E-44B3-87C6-652EAC676387}#DTTEXTCOMPONENT\u00264\u002627494120\u00260"
+    },
+    {
+        "Name":  "Bluetooth Device (RFCOMM Protocol TDI)",
+        "Description":  "Bluetooth Device (RFCOMM Protocol TDI)",
+        "Manufacturer":  "Microsoft",
+        "DeviceID":  "BTH\\MS_RFCOMM\\6\u0026FBF590F\u00260\u00260"
+    },
+    {
+        "Name":  "HID-compliant mouse",
+        "Description":  "HID-compliant mouse",
+        "Manufacturer":  "Microsoft",
+        "DeviceID":  "HID\\VID_046D\u0026PID_C542\u0026COL01\\6\u002689D8A3\u00262\u00260000"
+    },
+    {
+        "Name":  "UCM-UCSI ACPI Device",
+        "Description":  "UCM-UCSI ACPI Device",
+        "Manufacturer":  "Microsoft",
+        "DeviceID":  "ACPI\\USBC000\\0"
+    },
+    {
+        "Name":  "Composite Bus Enumerator",
+        "Description":  "Composite Bus Enumerator",
+        "Manufacturer":  "Microsoft",
+        "DeviceID":  "ROOT\\COMPOSITEBUS\\0000"
+    },
+    {
+        "Name":  "USB Root Hub (USB 3.0)",
+        "Description":  "USB Root Hub (USB 3.0)",
+        "Manufacturer":  "(Standard USB HUBs)",
+        "DeviceID":  "USB\\ROOT_HUB30\\4\u0026EC9486E\u00260\u00260"
+    },
+    {
+        "Name":  "UMBus Enumerator",
+        "Description":  "UMBus Enumerator",
+        "Manufacturer":  "Microsoft",
+        "DeviceID":  "UMB\\UMB\\1\u0026841921D\u00260\u0026TS_USB_HUB_ENUMERATOR"
+    },
+    {
+        "Name":  "Goodix MOC Fingerprint",
+        "Description":  "Goodix MOC Fingerprint",
+        "Manufacturer":  "Goodix",
+        "DeviceID":  "USB\\VID_27C6\u0026PID_6594\\UID4FE2BDEC_XXXX_MOC_B0"
+    },
+    {
+        "Name":  "Realtek Audio Effects Component",
+        "Description":  "Realtek Audio Effects Component",
+        "Manufacturer":  "Realtek",
+        "DeviceID":  "SWD\\DRIVERENUM\\{C3A63EDD-2D27-4B66-B155-5E94B43D926A}#REALTEKAPO\u00266\u002610EBDD06\u00260"
+    },
+    {
+        "Name":  "USB4 Virtual power coordination device",
+        "Description":  "USB4 Virtual power coordination device",
+        "Manufacturer":  null,
+        "DeviceID":  "USB4\\VIRTUAL_POWER_PDO\\4\u0026B0A81B8\u00260\u00260"
+    },
+    {
+        "Name":  "APP Mode",
+        "Description":  "WinUsb Device",
+        "Manufacturer":  "WinUsb Device",
+        "DeviceID":  "USB\\VID_5986\u0026PID_2142\u0026MI_04\\6\u0026D7F3E0C\u00260\u00260004"
+    },
+    {
+        "Name":  "USB4 Virtual power coordination device",
+        "Description":  "USB4 Virtual power coordination device",
+        "Manufacturer":  null,
+        "DeviceID":  "USB4\\VIRTUAL_POWER_PDO\\4\u00263B37BDA\u00260\u00260"
+    },
+    {
+        "Name":  "Integrated IR Camera",
+        "Description":  "Integrated IR Camera",
+        "Manufacturer":  "SunplusIT",
+        "DeviceID":  "USB\\VID_5986\u0026PID_2142\u0026MI_02\\6\u0026D7F3E0C\u00260\u00260002"
+    },
+    {
+        "Name":  "PCI Express Root Complex",
+        "Description":  "PCI Express Root Complex",
+        "Manufacturer":  "(Standard system devices)",
+        "DeviceID":  "ACPI\\PNP0A08\\0"
+    },
+    {
+        "Name":  "HID-compliant system controller",
+        "Description":  "HID-compliant system controller",
+        "Manufacturer":  "(Standard system devices)",
+        "DeviceID":  "HID\\INTC816\u0026COL02\\3\u002610839A5C\u00260\u00260001"
+    },
+    {
+        "Name":  "HID-compliant device",
+        "Description":  "HID-compliant device",
+        "Manufacturer":  "(Standard system devices)",
+        "DeviceID":  "HID\\VID_046D\u0026PID_C542\u0026COL02\\6\u002689D8A3\u00262\u00260001"
+    },
+    {
+        "Name":  "Integrated Camera",
+        "Description":  "Integrated Camera",
+        "Manufacturer":  "SunplusIT",
+        "DeviceID":  "USB\\VID_5986\u0026PID_2142\u0026MI_00\\6\u0026D7F3E0C\u00260\u00260000"
+    },
+    {
+        "Name":  "HID-compliant mouse",
+        "Description":  "HID-compliant mouse",
+        "Manufacturer":  "Microsoft",
+        "DeviceID":  "HID\\VID_25A7\u0026PID_FA70\u0026MI_01\u0026COL01\\7\u002618E33271\u00260\u00260000"
+    },
+    {
+        "Name":  "Microsoft ACPI-Compliant System",
+        "Description":  "Microsoft ACPI-Compliant System",
+        "Manufacturer":  "Microsoft",
+        "DeviceID":  "ACPI_HAL\\PNP0C08\\0"
+    },
+    {
+        "Name":  "HID-compliant vendor-defined device",
+        "Description":  "HID-compliant vendor-defined device",
+        "Manufacturer":  "(Standard system devices)",
+        "DeviceID":  "HID\\VID_25A7\u0026PID_FA70\u0026MI_01\u0026COL06\\7\u002618E33271\u00260\u00260005"
+    },
+    {
+        "Name":  "Microsoft UEFI-Compliant System",
+        "Description":  "Microsoft UEFI-Compliant System",
+        "Manufacturer":  "Microsoft",
+        "DeviceID":  "ACPI_HAL\\UEFI\\0"
+    },
+    {
+        "Name":  "Intel(R) Wireless Bluetooth(R)",
+        "Description":  "Intel(R) Wireless Bluetooth(R)",
+        "Manufacturer":  "Intel Corporation",
+        "DeviceID":  "USB\\VID_8087\u0026PID_0033\\5\u00262C15F40F\u00260\u002610"
+    },
+    {
+        "Name":  "USB Root Hub (USB 3.0)",
+        "Description":  "USB Root Hub (USB 3.0)",
+        "Manufacturer":  "(Standard USB HUBs)",
+        "DeviceID":  "USB\\ROOT_HUB30\\1\u00262B53A856\u00260\u00260"
+    },
+    {
+        "Name":  "USB Composite Device",
+        "Description":  "USB Composite Device",
+        "Manufacturer":  "(Standard USB Host Controller)",
+        "DeviceID":  "USB\\VID_5986\u0026PID_2142\\01.00.00"
+    },
+    {
+        "Name":  "USB4(TM) Host Router (Microsoft)",
+        "Description":  "USB4(TM) Host Router (Microsoft)",
+        "Manufacturer":  "Generic USB4 Host Router",
+        "DeviceID":  "PCI\\VEN_8086\u0026DEV_A73E\u0026SUBSYS_230E17AA\u0026REV_00\u0026USB4_MS_CM\\3\u002611583659\u00260\u00266A"
+    },
+    {
+        "Name":  "USB Input Device",
+        "Description":  "USB Input Device",
+        "Manufacturer":  "(Standard system devices)",
+        "DeviceID":  "USB\\VID_25A7\u0026PID_FA70\u0026MI_00\\6\u002615887687\u00262\u00260000"
+    },
+    {
+        "Name":  "HID-compliant mouse",
+        "Description":  "HID-compliant mouse",
+        "Manufacturer":  "Microsoft",
+        "DeviceID":  "HID\\ELAN0676\u0026COL01\\5\u0026218C0298\u00260\u00260000"
+    },
+    {
+        "Name":  "HID-compliant vendor-defined device",
+        "Description":  "HID-compliant vendor-defined device",
+        "Manufacturer":  "(Standard system devices)",
+        "DeviceID":  "HID\\VID_25A7\u0026PID_FA70\u0026MI_01\u0026COL02\\7\u002618E33271\u00260\u00260001"
+    },
+    {
+        "Name":  "Remote Desktop USB Hub",
+        "Description":  "Remote Desktop USB Hub",
+        "Manufacturer":  "(Standard system devices)",
+        "DeviceID":  "TS_USB_HUB_ENUMERATOR\\UMB\\2\u002630D3618\u00260\u0026TS_USB_HUB"
+    },
+    {
+        "Name":  "HID-compliant consumer control device",
+        "Description":  "HID-compliant consumer control device",
+        "Manufacturer":  "Microsoft",
+        "DeviceID":  "HID\\VID_25A7\u0026PID_FA70\u0026MI_01\u0026COL07\\7\u002618E33271\u00260\u00260006"
+    },
+    {
+        "Name":  "USB Composite Device",
+        "Description":  "USB Composite Device",
+        "Manufacturer":  "(Standard USB Host Controller)",
+        "DeviceID":  "USB\\VID_25A7\u0026PID_FA70\\5\u00262C15F40F\u00260\u00261"
+    },
+    {
+        "Name":  "Intel(R) Dynamic Tuning Technology Updater Component",
+        "Description":  "Intel(R) Dynamic Tuning Technology Updater Component",
+        "Manufacturer":  "Intel",
+        "DeviceID":  "SWC\\VID8086_DTTCFG_1.0\\00"
+    },
+    {
+        "Name":  "USB4(TM) Host Router (Microsoft)",
+        "Description":  "USB4(TM) Host Router (Microsoft)",
+        "Manufacturer":  "Generic USB4 Host Router",
+        "DeviceID":  "PCI\\VEN_8086\u0026DEV_A76D\u0026SUBSYS_230E17AA\u0026REV_00\u0026USB4_MS_CM\\3\u002611583659\u00260\u00266B"
+    },
+    {
+        "Name":  "Parsec Virtual USB Adapter",
+        "Description":  "Parsec Virtual USB Adapter",
+        "Manufacturer":  "Parsec Cloud, Inc.",
+        "DeviceID":  "ROOT\\USB\\0000"
+    },
+    {
+        "Name":  "USB4 Root Router (1.0)",
+        "Description":  "USB4 Root Router",
+        "Manufacturer":  "Generic USB4 Device Router",
+        "DeviceID":  "USB4\\ROOT_DEVICE_ROUTER\u0026VID_8086\u0026PID_A73E\\4\u00263B37BDA\u00260\u00260"
+    },
+    {
+        "Name":  "USB Input Device",
+        "Description":  "USB Input Device",
+        "Manufacturer":  "(Standard system devices)",
+        "DeviceID":  "USB\\VID_25A7\u0026PID_FA70\u0026MI_01\\6\u002615887687\u00262\u00260001"
+    },
+    {
+        "Name":  "HID-compliant vendor-defined device",
+        "Description":  "HID-compliant vendor-defined device",
+        "Manufacturer":  "(Standard system devices)",
+        "DeviceID":  "HID\\ELAN0676\u0026COL02\\5\u0026218C0298\u00260\u00260001"
+    },
+    {
+        "Name":  "HID-compliant system controller",
+        "Description":  "HID-compliant system controller",
+        "Manufacturer":  "(Standard system devices)",
+        "DeviceID":  "HID\\VID_25A7\u0026PID_FA70\u0026MI_01\u0026COL08\\7\u002618E33271\u00260\u00260007"
+    }
+]

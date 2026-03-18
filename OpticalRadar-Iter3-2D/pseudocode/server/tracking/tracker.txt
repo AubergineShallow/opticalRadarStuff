@@ -1,0 +1,301 @@
+FILE: tracker.py
+PURPOSE: Main coordinator for the object tracking subsystem.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This converts individual frame-by-frame detections into persistent tracked
+objects that maintain identity over time.
+
+Without tracking: "I see a dot at (50, 75, 100)"
+With tracking: "Object #7 is at (50, 75, 100) moving East at 5 m/s"
+
+--------------------------------------------------------------------------------
+THE TRACKING PROBLEM
+--------------------------------------------------------------------------------
+
+INPUTS: Detections (from voxel grid)
+  - Each frame: list of 3D positions
+  - Detections come and go
+  - No inherent identity
+
+OUTPUTS: Tracks
+  - Persistent objects with IDs
+  - Position history
+  - Velocity estimation
+  - Track state (new, confirmed, lost)
+
+CHALLENGE: Data Association
+  - Frame N: Detect at position A, B, C
+  - Frame N+1: Detect at position D, E, F
+  - Question: Which detection in N+1 corresponds to which in N?
+  - Answer: Data association algorithm (handled by data_association.py)
+
+--------------------------------------------------------------------------------
+TRACK LIFECYCLE
+--------------------------------------------------------------------------------
+
+STATE 1: TENTATIVE
+  - First detection received
+  - Not yet confirmed as real object
+  - Could be noise or false positive
+  - Displayed as faint/unconfirmed
+
+STATE 2: CONFIRMED
+  - Multiple consecutive detections
+  - High confidence this is a real object
+  - Displayed prominently
+  - Tracked actively
+
+STATE 3: LOST  
+  - No recent detections
+  - Object may have left field of view
+  - Or temporarily occluded
+  - Keep track for brief period in case it returns
+
+STATE 4: DELETED
+  - Lost for too long
+  - Remove from system
+  - Free resources
+
+TRANSITION RULES:
+  - TENTATIVE → CONFIRMED: 3+ hits in 2 seconds
+  - CONFIRMED → LOST: No hits for 1 second
+  - LOST → CONFIRMED: New hit received
+  - LOST → DELETED: Lost for 5+ seconds
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. INITIALIZE
+   PROCESS:
+     - Create empty track database
+     - Initialize Kalman filter factory
+     - Set up data association matcher
+     - Load configuration parameters
+
+2. UPDATE (Main tracking loop)
+   INPUT: List of detections (3D positions) from current frame
+   
+   PROCESS:
+     a. PREDICT
+        - For each existing track:
+          - Use Kalman filter to predict current position
+          - Based on previous position + velocity
+     
+     b. ASSOCIATE
+        - Match detections to predicted track positions
+        - Use data_association module
+        - Result: pairs of (detection, track) + unmatched detections
+     
+     c. UPDATE MATCHED TRACKS
+        - For each matched pair:
+          - Update track's Kalman filter with new detection
+          - Update last_seen timestamp
+          - If tentative and enough hits: promote to CONFIRMED
+     
+     d. CREATE NEW TRACKS
+        - For each unmatched detection:
+          - Create new tentative track
+          - Initialize Kalman filter
+          - Assign new track ID
+     
+     e. HANDLE MISSED TRACKS
+        - For each track that wasn't matched:
+          - Increment miss counter
+          - If confirmed track: mark as LOST
+          - If lost too long: mark as DELETED
+     
+     f. CLEANUP
+        - Remove deleted tracks
+        - Trim old history data
+   
+   OUTPUT: Updated track database
+
+3. GET CONFIRMED TRACKS  (get_confirmed_tracks)
+   OUTPUT: List of confirmed tracks only
+   
+   NOTE: This is the primary method for getting tracks to display/use.
+   Tentative and lost tracks are excluded.
+
+4. GET TRACK BY ID
+   INPUT: Track ID
+   OUTPUT: Track object with full state
+
+5. GET TRACK STATISTICS
+   OUTPUT: Summary statistics
+   
+   EXAMPLE:
+   ```
+   {
+     "total_tracks": 42,
+     "tentative": 5,
+     "confirmed": 8,
+     "lost": 2,
+     "avg_track_lifetime": 12.5,  # seconds
+     "longest_track": 145.2  # seconds
+   }
+   ```
+
+6. PREDICT FUTURE POSITION
+   INPUT: Track ID, time ahead (seconds)
+   OUTPUT: Estimated future position
+   
+   PROCESS:
+     - Use track's velocity
+     - Extrapolate position
+     - Include uncertainty estimate
+   
+   USE CASE:
+     - Predict where object will be in 1 second
+     - Useful for handoff to other systems
+
+7. EXPORT TRACK HISTORY
+   INPUT: Track ID
+   OUTPUT: List of all historical positions/times
+   
+   USE CASE:
+     - Replay track trajectory
+     - Analyze motion patterns
+     - Export for external analysis
+
+--------------------------------------------------------------------------------
+TRACK DATA STRUCTURE
+--------------------------------------------------------------------------------
+
+TRACK OBJECT:
+```
+{
+  "id": 7,  # Unique track identifier
+  "state": "CONFIRMED",  # TENTATIVE, CONFIRMED, LOST, DELETED
+  
+  # Current state estimate
+  "position": [50.0, 75.0, 100.0],  # X, Y, Z in meters
+  "velocity": [5.0, 0.0, 0.0],  # vX, vY, vZ in m/s
+  "covariance": [[...], [...], [...]],  # Uncertainty matrix
+  
+  # Kalman filter
+  "filter": KalmanFilter(...),
+  
+  # Lifecycle tracking
+  "created_at": 1738123445.0,  # timestamp
+  "last_update": 1738123450.5,  # timestamp
+  "age": 5.5,  # seconds since creation
+  "hits": 165,  # total number of matched detections
+  "misses": 2,  # consecutive frames without detection
+  
+  # History
+  "history": [
+    {"time": 1738123445.0, "pos": [45.0, 75.0, 100.0]},
+    {"time": 1738123445.033, "pos": [45.2, 75.0, 100.0]},
+    ...
+  ]
+}
+```
+
+--------------------------------------------------------------------------------
+CONFIGURATION PARAMETERS
+--------------------------------------------------------------------------------
+
+From config.tracking:
+
+MAX_TRACK_AGE: 5.0 seconds
+  - Delete tracks lost for longer than this
+
+MIN_HITS_TO_CONFIRM: 3
+  - Tentative → confirmed after this many hits
+
+MAX_DISTANCE_FOR_ASSOCIATION: 5.0 meters
+  - Detection must be within this distance to match track
+  - Too large: false associations
+  - Too small: tracks break unnecessarily
+
+HISTORY_LENGTH: 100 frames
+  - Keep this many positions in history
+  - Older data is trimmed
+
+PREDICTION_TIME_STEP: 0.033 seconds (30 FPS)
+  - How far ahead to predict
+
+--------------------------------------------------------------------------------
+INTEGRATION WITH SYSTEM
+--------------------------------------------------------------------------------
+
+CALLED FROM server_main.py:
+```python
+# In main loop, after voxel grid decay
+voxel_grid.decay()  # Cool down old data
+detections = voxel_grid.get_detections()  # Clustered hot voxels
+
+# Update tracker with detections (predict is handled internally)
+result = tracker.update(detections)
+
+# Get confirmed tracks for visualization and calibration
+confirmed_tracks = tracker.get_confirmed_tracks()
+
+# Display tracks instead of raw detections
+visualizer.update(confirmed_tracks)
+
+# Use confirmed tracks for calibration (not hot voxels!)
+for track in confirmed_tracks:
+    # Match rays to track positions for calibration
+    ...
+```
+
+REPLACES:
+  - Old system: visualize raw voxel positions
+  - New system: visualize tracked objects
+  - Provides temporal continuity
+
+BENEFITS:
+  - Maintains object identity
+  - Estimates velocity
+  - Filters noise (tentative tracks)
+  - Handles brief occlusions (lost state)
+
+================================================================================
+EXAMPLE SCENARIO
+================================================================================
+
+FRAME 1:
+  - Detections: [A, B]
+  - Actions: Create Track#1 at A, Track#2 at B (TENTATIVE)
+
+FRAME 2:
+  - Detections: [A', B', C]
+  - Association: A'→Track#1, B'→Track#2, C is new
+  - Actions: Update Track#1 & Track#2, Create Track#3 at C
+
+FRAME 3:
+  - Detections: [A'', B'']
+  - Association: A''→Track#1, B''→Track#2
+  - Actions: Update Track#1 & Track#2 (now CONFIRMED after 3 hits)
+           Track#3 has no match → increment miss counter
+
+FRAME 4:
+  - Detections: [A''', B''', C']
+  - Association: A'''→Track#1, B'''→Track#2, C'→Track#3
+  - Actions: Update all tracks, Track#3 confirmed
+
+FRAME 10:
+  - Detections: [A''''']
+  - Association: A'''''→Track#1
+  - Actions: Track#2 & Track#3 not seen for 6 frames → LOST
+
+FRAME 15:
+  - Detections: [A'''''']
+  - Association: A''''''→Track#1
+  - Actions: Track#2 & Track#3 lost too long → DELETED
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Most critical missing feature from original system
+- Enables answering "how many objects?" not just "where are the dots?"
+- Velocity estimation enables prediction
+- State filtering reduces false positives
+- Essential for any practical application
+- Foundation for more advanced features (classification, trajectory prediction)

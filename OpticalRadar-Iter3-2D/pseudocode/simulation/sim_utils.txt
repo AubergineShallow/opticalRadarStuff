@@ -1,0 +1,44 @@
+FILE: sim_utils.py
+PURPOSE: Helper math for the simulation.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+This file provides the math functions that the simulator needs. It's mostly
+copies of functions from other files, kept separate to avoid circular
+loading problems.
+
+--------------------------------------------------------------------------------
+FUNCTIONS
+--------------------------------------------------------------------------------
+
+1. WGS84 TO ECEF
+   - Convert GPS coordinates to Earth-centered XYZ
+   - Same as geo.py version
+
+2. ECEF TO ENU
+   - Convert Earth-centered XYZ to local meters
+   - Same as geo.py version
+
+3. CALCULATE LOOK ANGLES
+   - Find the direction from camera to target
+   - Returns compass angle and up/down angle
+   - Same as geo.py version
+
+--------------------------------------------------------------------------------
+WHY DUPLICATE THESE FUNCTIONS
+--------------------------------------------------------------------------------
+
+- The simulation folder needs to be independent
+- Importing from other folders creates loading conflicts
+- Duplicating keeps the simulator self-contained
+- Trade-off: Code repetition, but simpler imports
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Keeps the simulation module independent
+- Avoids complex import dependencies
+- Makes the simulator easier to use standalone

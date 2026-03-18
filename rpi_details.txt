@@ -1,0 +1,12 @@
+﻿#!/bin/bash
+pkill -f 'python3 -m rpi.rpi_node'
+pkill -f 'stream.py'
+cd /home/pi/optical_radar/code
+export PYTHONPATH=/home/pi/optical_radar/code
+nohup python3 -m rpi.rpi_node --id cam_pi --server 169.254.9.75 --port 5005 > node.log 2>&1 &
+echo 'Node started with fixed PYTHONPATH'
+===SEP===
+common
+node.log
+rpi
+stream.py

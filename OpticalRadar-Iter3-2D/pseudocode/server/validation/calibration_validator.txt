@@ -1,0 +1,278 @@
+FILE: calibration_validator.py
+PURPOSE: Validate that calibration is improving, not degrading the system.
+
+================================================================================
+WHAT THIS FILE DOES (Plain English)
+================================================================================
+
+The calibration system can converge to wrong solutions. This validator
+ensures calibration corrections are actually helping, not hurting.
+
+Think of it as a "quality control inspector" for calibration.
+
+--------------------------------------------------------------------------------
+VALIDATION METHODS
+--------------------------------------------------------------------------------
+
+METHOD 1: RESIDUAL ERROR TRACKING
+  - Measure how far detections are from hot voxels
+  - After calibration, residual should decrease
+  - If residual increases, calibration is making things worse
+
+METHOD 2: DETECTION CONSISTENCY
+  - Same object seen by multiple cameras should yield same 3D position
+  - Measure variance across camera views
+  - Good calibration = low variance
+
+METHOD 3: GROUND TRUTH COMPARISON (External)
+  - Handled by separate GroundTruthValidator
+  - Compares detected positions vs known (simulated) positions
+  - Used for final system verification, not real-time calibration loop
+
+METHOD 4: CONVERGENCE MONITORING
+  - Track magnitude of corrections over time
+  - Should decrease as system converges
+  - Oscillating corrections = not converging
+
+--------------------------------------------------------------------------------
+QUALITY METRICS
+--------------------------------------------------------------------------------
+
+CALIBRATION SCORE (0-100):
+  - 100 = perfect calibration
+  - 0 = completely wrong
+  - Based on multiple factors weighted
+
+COMPONENTS:
+  1. Residual error (40% weight)
+     - Average distance from detection ray to hot voxel center
+     - Lower is better
+  
+  2. Multi-camera consistency (30% weight)
+     - Variance in 3D position from different cameras
+     - Lower is better
+  
+  3. Correction stability (20% weight)
+     - Rate of change in correction magnitude
+     - Decreasing trend is better
+  
+  4. Detection count (10% weight)
+     - Cameras with bad calibration may stop detecting
+     - Higher detection rate suggests good calibration
+
+SCORE CALCULATION:
+  ```
+  score = 40 * (1 - normalized_residual_error) +
+          30 * (1 - normalized_variance) +
+          20 * convergence_factor +
+          10 * normalized_detection_rate
+  ```
+
+--------------------------------------------------------------------------------
+FUNCTIONS (What you can do)
+--------------------------------------------------------------------------------
+
+1. ADD OBSERVATION
+   INPUT: Camera ID, detection ray, hot voxel position
+   PROCESS:
+     - Calculate distance from ray to voxel center
+     - Record as observation for this camera
+     - Update running statistics
+   OUTPUT: Observation stored
+
+2. CALCULATE RESIDUAL ERROR
+   INPUT: Camera ID (or all cameras)
+   PROCESS:
+     - For all recent observations:
+       - Calculate ray-to-point distance
+       - Average across all observations
+   OUTPUT: Mean residual error + standard deviation
+
+3. CALCULATE CONSISTENCY
+   INPUT: Object (detected by multiple cameras)
+   PROCESS:
+     - Get estimated 3D positions from each camera
+     - Calculate centroid (average position)
+     - Measure variance (spread) around centroid
+   OUTPUT: Variance metric
+   
+   INTERPRETATION:
+     - Low variance (< 2m): cameras agree, good calibration
+     - High variance (> 10m): cameras disagree, poor calibration
+
+4. EVALUATE CALIBRATION
+   INPUT: Camera ID
+   OUTPUT: Calibration quality score (0-100)
+   
+   PROCESS:
+     - Calculate all component metrics
+     - Normalize to 0-1 range
+     - Apply weights
+     - Return composite score
+
+5. TRACK CONVERGENCE
+   INPUT: Camera ID, new correction
+   PROCESS:
+     - Record correction magnitude
+     - Calculate trend (increasing/decreasing/oscillating)
+     - Detect non-convergence (corrections not getting smaller)
+   OUTPUT: Convergence state (CONVERGING, STABLE, DIVERGING, OSCILLATING)
+
+6. VALIDATE CORRECTION
+   INPUT: Camera ID, proposed correction
+   OUTPUT: APPROVE or REJECT + reason
+   
+   VALIDATION RULES:
+     - Reject if correction too large (> 15°)
+     - Reject if would worsen recent metrics
+     - Reject if camera hasn't had enough observations
+     - Approve otherwise
+   
+   EXAMPLE:
+   ```
+   result = validator.validate_correction("RPI1", correction_quaternion)
+   if result == APPROVE:
+       apply_correction(correction_quaternion)
+   else:
+       log.warning("calibration", "Correction rejected", 
+                   camera="RPI1", reason=result.reason)
+   ```
+
+7. GENERATE REPORT
+   OUTPUT: Human-readable calibration quality report
+   
+   EXAMPLE:
+   ```
+   Calibration Quality Report
+   ===========================
+   
+   CAMERA: RPI1
+   Overall Score: 87/100 (GOOD)
+   
+   Residual Error: 1.2m ± 0.5m (EXCELLENT)
+   Consistency: 2.3m variance (GOOD)
+   Convergence: STABLE
+   Detection Rate: 15/sec (NORMAL)
+   
+   RECOMMENDATION: Calibration is performing well.
+   
+   ---
+   
+   CAMERA: RPI3
+   Overall Score: 42/100 (POOR)
+   
+   Residual Error: 8.5m ± 3.2m (POOR)
+   Consistency: 15.2m variance (POOR)
+   Convergence: DIVERGING ⚠️
+   Detection Rate: 3/sec (LOW)
+   
+   RECOMMENDATION: Manual calibration required.
+   Action: Check camera mounting integrity.
+   ```
+
+8. COMPARE AGAINST GROUND TRUTH
+   INPUT: Known object positions, detected positions
+   PROCESS:
+     - For each known object:
+       - Find nearest detection
+       - Calculate position error
+       - Average across all objects
+   OUTPUT: Mean absolute error
+   
+   USE CASE:
+     - During simulation with known targets
+     - Using fixed reference landmarks
+
+9. SET ALERTS
+   INPUT: Alert thresholds
+   PROCESS:
+     - Monitor calibration scores
+     - Trigger alerts when thresholds crossed
+   
+   ALERT CONDITIONS:
+     - Score drops below 50 (WARNING)
+     - Score drops below 30 (CRITICAL)
+     - Convergence state = DIVERGING (WARNING)
+     - Large sudden change in residual error (WARNING)
+
+--------------------------------------------------------------------------------
+COLD START BOOTSTRAP
+--------------------------------------------------------------------------------
+
+PROBLEM:
+  - New system with no calibration
+  - Detections are very wrong
+  - Can't validate because no "good" baseline
+
+SOLUTION:
+  1. Use manual rough calibration as starting point
+  2. Lower validation thresholds initially
+  3. Gradually tighten thresholds as quality improves
+  4. Use simulation mode with ground truth for initial calibration
+
+BOOTSTRAP PROCEDURE:
+  ```
+  1. Deploy cameras with approximate(ish) alignment
+  2. Run simulation with known targets
+  3. Allow calibration to iterate
+  4. Validate against ground truth
+  5. If score > 70, switch to real detections
+  6. Continue calibration with validation enabled
+  ```
+
+--------------------------------------------------------------------------------
+INTEGRATION WITH CALIBRATION
+--------------------------------------------------------------------------------
+
+BEFORE CALIBRATION:
+  ```
+  observations = collect_observations()
+  corrections = calibration.solve(observations)
+  
+  for camera_id, correction in corrections:
+      result = validator.validate_correction(camera_id, correction)
+      if result == APPROVE:
+          calibration.apply(camera_id, correction)
+      else:
+          log.warning("Correction rejected", camera=camera_id)
+  ```
+
+PERIODIC MONITORING:
+  ```
+  Every 60 seconds:
+      for camera in all_cameras:
+          score = validator.evaluate_calibration(camera)
+          metrics.set_gauge(f"calibration_score_{camera}", score)
+          
+          if score < 30:
+              alert("Critical calibration degradation", camera)
+  ```
+
+================================================================================
+SIMULATION GROUND TRUTH MODE
+================================================================================
+
+When running with sim_node:
+  - Simulator reports true target positions
+  - Server compares detected positions vs true positions
+  - Calculate exact calibration error
+  - Use for validation during development
+
+WORKFLOW:
+  1. Start simulator with known target
+  2. Cameras detect target (with uncalibrated angles)
+  3. Server reconstructs 3D position (will be wrong)
+  4. Validator compares to ground truth position
+  5. Measures calibration error
+  6. Guides calibration corrections
+
+================================================================================
+WHY THIS MATTERS
+================================================================================
+
+- Prevents calibration from making things worse
+- Detects when manual intervention needed
+- Provides confidence in system accuracy
+- Enables gradual improvement over time
+- Critical for autonomous operation
+- Avoids silent degradation

@@ -1,0 +1,32 @@
+FILE: websocket_server.py (Server - Phase 1)
+PURPOSE: Broadcasts system state (Tracks, Nodes, Status) to the Frontend via WebSockets.
+
+================================================================================
+WHAT THIS FILE DOES
+================================================================================
+
+This module bridges the Python Backend with the React Frontend. It blindly 
+broadcasts JSON updates for any connected client (UI) to render.
+
+--------------------------------------------------------------------------------
+COMPONENTS
+--------------------------------------------------------------------------------
+
+1. WebSocketBroadcaster
+   - Wrapper around `websockets` library
+   - Runs its own asyncio loop in a separate thread
+   - Handles client connections lists
+
+2. BROADCAST TYPES
+   - SYSTEM_STATUS: {fps, active_nodes, uptime}
+   - TRACK_UPDATE: List of Tracks [{id, pos, state...}]
+   - NODE_UPDATE: List of Nodes [{node_id, status, config...}]
+
+--------------------------------------------------------------------------------
+USAGE
+--------------------------------------------------------------------------------
+
+server = WebSocketBroadcaster(port=5000)
+server.start()
+...
+server.broadcast("TRACK_UPDATE", track_list)

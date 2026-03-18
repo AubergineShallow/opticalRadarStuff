@@ -1,0 +1,35 @@
+# optical-radar-edge.service
+# PURPOSE: Auto-start the Optical Radar edge node on Raspberry Pi boot.
+#
+# INSTALLATION:
+#   sudo cp optical-radar-edge.service /etc/systemd/system/
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable optical-radar-edge.service
+#
+# MANAGEMENT:
+#   sudo systemctl start  optical-radar-edge   # Start now
+#   sudo systemctl stop   optical-radar-edge   # Stop
+#   sudo systemctl status optical-radar-edge   # Check status
+#   journalctl -u optical-radar-edge -f        # View live logs
+
+[Unit]
+Description=Optical Radar Edge Node (Camera + Telemetry)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=forking
+User=pi
+WorkingDirectory=/home/pi/optical_radar/code
+ExecStartPre=/bin/sleep 5
+ExecStart=/bin/bash /home/pi/optical_radar/bootstrap_edge.sh
+ExecStop=/bin/bash -c "pkill -f 'python3 -m rpi.rpi_node'; pkill -f 'stream.py'"
+Restart=on-failure
+RestartSec=10
+TimeoutStartSec=30
+
+# Environment
+Environment=PYTHONPATH=/home/pi/optical_radar/code
+
+[Install]
+WantedBy=multi-user.target
