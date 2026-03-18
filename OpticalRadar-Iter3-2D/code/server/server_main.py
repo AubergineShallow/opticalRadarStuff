@@ -352,6 +352,7 @@ class OpticalRadarServer:
                 "temp_c": 0.0,
                 "ip_address": record.ip_address,
                 "location": [0, 0],
+                "mode": record.mode,
                 "config": record.sensor_config
             })
         self.ws_server.broadcast("NODE_UPDATE", nodes)
@@ -386,6 +387,8 @@ class OpticalRadarServer:
                 packet.timestamp,
                 0,
                 0,
+                time.time(),
+                0, # Default mode
                 ip_address
             )
             
@@ -429,6 +432,8 @@ class OpticalRadarServer:
             packet.timestamp,
             packet.sequence_number,
             packet.health_flags,
+            receive_time,
+            packet.mode,
             ip_address
         )
 

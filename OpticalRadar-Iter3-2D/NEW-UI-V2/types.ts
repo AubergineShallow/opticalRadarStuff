@@ -71,6 +71,7 @@ export interface NodeHealth {
     temp_c: number;        // Celsius
     ip_address: string;
     location: Vector2;     // ENU [East, North]
+    mode: number;          // 0: tracking, 1: stream
     // Configuration for Visualization
     config?: {
         azimuth_deg: number; // Degrees clockwise from North

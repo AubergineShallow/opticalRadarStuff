@@ -19,8 +19,8 @@ PACKET_TYPE_COMMAND = 0x02
 PACKET_TYPE_GROUND_TRUTH = 0x03
 PACKET_TYPE_ANNOUNCE = 0x04
 
-# Header size: 61 bytes for V3 (vector_count is uint16)
-HEADER_SIZE = 61
+# Header size: 62 bytes for V3.1 (added mode byte)
+HEADER_SIZE = 62
 SIGNATURE_SIZE = 32
 
 
@@ -147,6 +147,7 @@ class TelemetryPacket:
     altitude: float = 0.0
     orientation: tuple = (1.0, 0.0, 0.0, 0.0)  # Quaternion [w, x, y, z]
     health_flags: int = 0
+    mode: int = 0  # 0: tracking, 1: stream
     
     # Body
     vectors: List[MotionVector] = field(default_factory=list)
@@ -192,11 +193,15 @@ class TelemetryPacket:
             self.health_flags
         )
         header += struct.pack(
+            '>B',            # mode (1)
+            self.mode
+        )
+        header += struct.pack(
             '>H',            # vector_count (2, uint16)
             len(self.vectors) & 0xFFFF
         )
         
-        # Current: 2 + 8 + 4 + 8 + 8 + 8 + 4 + 16 + 1 + 2 = 61 bytes
+        # Current: 2 + 8 + 4 + 8 + 8 + 8 + 4 + 16 + 1 + 1 + 2 = 62 bytes
         assert len(header) == HEADER_SIZE, f"Header size mismatch: {len(header)}"
         
         return header
@@ -241,6 +246,8 @@ class TelemetryPacket:
         
         health_flags, = struct.unpack_from('>B', data, offset)
         offset += 1
+        mode, = struct.unpack_from('>B', data, offset)
+        offset += 1
         vector_count, = struct.unpack_from('>H', data, offset)
         offset += 2
         
@@ -271,6 +278,7 @@ class TelemetryPacket:
             altitude=altitude,
             orientation=(qw, qx, qy, qz),
             health_flags=health_flags,
+            mode=mode,
             vectors=vectors,
             signature=signature
         )
@@ -353,7 +361,8 @@ def create_telemetry_packet(
     orientation: tuple,
     vectors: List[MotionVector],
     sequence_number: int,
-    health_flags: int = 0x07
+    health_flags: int = 0x07,
+    mode: int = 0
 ) -> TelemetryPacket:
     """Helper to create a telemetry packet."""
     return TelemetryPacket(
@@ -365,5 +374,6 @@ def create_telemetry_packet(
         altitude=altitude,
         orientation=orientation,
         health_flags=health_flags,
+        mode=mode,
         vectors=vectors
     )

@@ -355,6 +355,7 @@ class RPiNode:
             altitude=alt,
             orientation=orientation,
             health_flags=self._get_health_flags(),
+            mode=1 if self.mode == "stream" else 0,
             vectors=protocol_vectors
         )
         
@@ -407,7 +408,11 @@ class RPiNode:
             if self.mode == "tracking":
                 self.process_frame()
             elif self.mode == "stream":
+                # Still process frame to send telemetry (mode sync), but skip motion vector logic?
+                # Actually, process_frame already handles both if we modify it.
+                # Let's keep them separate but ensure telemetry is sent.
                 self.process_stream_frame()
+                self.process_frame() # Send telemetry with mode=1
             else:
                 print(f"Unknown mode: {self.mode}")
                 time.sleep(1.0)

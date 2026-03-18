@@ -26,6 +26,7 @@ class NodeHealthRecord:
     sequence_gaps: int = 0
     last_sequence: int = -1
     health_flags: int = 0
+    mode: int = 0  # 0: tracking, 1: stream
     
     # Calculated metrics
     packets_per_second: float = 0.0
@@ -45,6 +46,7 @@ class NodeHealthRecord:
         sequence: int,
         health_flags: int,
         receive_time: float,
+        mode: int = 0,
         ip_address: str = "unknown"
     ) -> None:
         """Update health record with new packet."""
@@ -76,6 +78,7 @@ class NodeHealthRecord:
         self.last_sequence = sequence
         self.packet_count += 1
         self.health_flags = health_flags
+        self.mode = mode
         
     def update_config(self, config: Dict) -> None:
         """Update static sensor configuration."""
@@ -157,6 +160,8 @@ class NodeHealthMonitor:
         packet_timestamp: float,
         sequence: int,
         health_flags: int,
+        receive_time: float,
+        mode: int = 0,
         ip_address: str = "unknown"
     ) -> None:
         """
@@ -167,10 +172,10 @@ class NodeHealthMonitor:
             packet_timestamp: Timestamp from packet
             sequence: Sequence number from packet
             health_flags: Health flags from packet
+            receive_time: Time packet was received
+            mode: Operating mode (0:tracking, 1:stream)
             ip_address: IP address of the sender
         """
-        receive_time = time.time()
-        
         if node_id not in self._nodes:
             self._nodes[node_id] = NodeHealthRecord(
                 node_id=node_id,
@@ -182,6 +187,7 @@ class NodeHealthMonitor:
             sequence,
             health_flags,
             receive_time,
+            mode,
             ip_address
         )
         

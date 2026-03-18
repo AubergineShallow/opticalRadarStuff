@@ -8,9 +8,8 @@ interface SensorListProps {
 }
 
 export const SensorList: React.FC<SensorListProps> = ({ nodes, selectedNodeId, onSelectNode }) => {
-    // Local state to track toggled mode for UI feedback. 
-    // The backend doesn't broadcast 'mode', so we keep track here.
-    const [nodeModes, setNodeModes] = useState<Record<string, 'tracking' | 'stream'>>({});
+    // Track in-flight requests to show loading/locked state
+    const [pendingNodeId, setPendingNodeId] = useState<string | null>(null);
 
     const handleToggleMode = async (nodeId: string, ipAddress: string, e: React.MouseEvent) => {
         e.stopPropagation(); // prevent row selection
@@ -20,23 +19,22 @@ export const SensorList: React.FC<SensorListProps> = ({ nodes, selectedNodeId, o
             return;
         }
 
-        const currentMode = nodeModes[nodeId] || 'tracking';
+        const node = nodes[nodeId];
+        const currentMode = node.mode === 1 ? 'stream' : 'tracking';
         const newMode = currentMode === 'tracking' ? 'stream' : 'tracking';
         
-        // Optimistic UI update
-        setNodeModes(prev => ({ ...prev, [nodeId]: newMode }));
+        setPendingNodeId(nodeId);
 
         try {
             const response = await fetch(`http://${ipAddress}:8000/set_mode?mode=${newMode}`);
             if (!response.ok) {
                 console.error("Failed to toggle mode:", response.statusText);
-                // Revert on failure
-                setNodeModes(prev => ({ ...prev, [nodeId]: currentMode }));
             }
         } catch (error) {
             console.error("Error toggling mode:", error);
-            // Revert on failure
-            setNodeModes(prev => ({ ...prev, [nodeId]: currentMode }));
+        } finally {
+            // We stay locked for 1.5 seconds to allow for heartbeat sync
+            setTimeout(() => setPendingNodeId(null), 1500);
         }
     };
 
@@ -73,7 +71,11 @@ export const SensorList: React.FC<SensorListProps> = ({ nodes, selectedNodeId, o
                             {Object.values(nodes).map((node) => {
                                 const isSelected = selectedNodeId === node.node_id;
                                 const isHealthy = node.status === 0;
-                                const currentMode = nodeModes[node.node_id] || 'tracking';
+                                
+                                // Source of truth is now the health record itself
+                                const isPending = pendingNodeId === node.node_id;
+                                const currentModeNum = node.mode;
+                                const currentMode = currentModeNum === 1 ? 'stream' : 'tracking';
                                 
                                 // Fake coordinates for now since we don't track camera position visually yet
                                 const posX = 0.0;
@@ -100,16 +102,18 @@ export const SensorList: React.FC<SensorListProps> = ({ nodes, selectedNodeId, o
                                             <td className="px-2 py-3 text-right font-mono">
                                                 <button 
                                                     onClick={(e) => handleToggleMode(node.node_id, node.ip_address, e)}
-                                                    disabled={!node.ip_address || node.ip_address === "unknown"}
+                                                    disabled={isPending || !node.ip_address || node.ip_address === "unknown"}
                                                     className={`px-2 py-1 rounded text-[10px] font-bold uppercase transition-colors ${
                                                         !node.ip_address || node.ip_address === "unknown" 
                                                             ? 'bg-slate-700 text-slate-500 cursor-not-allowed'
-                                                            : currentMode === 'stream' 
-                                                                ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 hover:bg-amber-500/30'
-                                                                : 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/50 hover:bg-indigo-500/30'
+                                                            : isPending
+                                                                ? 'bg-slate-600/50 text-slate-400 border border-slate-500/50 animate-pulse cursor-wait'
+                                                                : currentMode === 'stream' 
+                                                                    ? 'bg-amber-500/20 text-amber-400 border border-amber-500/50 hover:bg-amber-500/30'
+                                                                    : 'bg-indigo-500/20 text-indigo-400 border border-indigo-500/50 hover:bg-indigo-500/30'
                                                     }`}
                                                 >
-                                                    {currentMode === 'stream' ? 'Stream' : 'Track'}
+                                                    {isPending ? 'Sync...' : (currentMode === 'stream' ? 'Stream' : 'Track')}
                                                 </button>
                                             </td>
                                         </tr>
