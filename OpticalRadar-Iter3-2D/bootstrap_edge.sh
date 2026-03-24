@@ -33,7 +33,13 @@ echo "--- Optical Radar Edge Bootstrap ---"
 
 # ─── Step 0: Check Dependencies ──────────────────────────────────────────────
 echo "[0/4] Checking dependencies..."
-if ! python3 -W ignore -c "import pkg_resources; pkg_resources.require(open('$INSTALL_DIR/requirements.txt').read())" 2>/dev/null; then
+if ! python3 -W ignore -c "
+import sys, pkg_resources
+try:
+    pkg_resources.require(open('$INSTALL_DIR/requirements.txt').read())
+except Exception:
+    sys.exit(1)
+" 2>/dev/null; then
     echo "  Missing Python packages. Installing..."
     pip3 install -r "$INSTALL_DIR/requirements.txt"
 else

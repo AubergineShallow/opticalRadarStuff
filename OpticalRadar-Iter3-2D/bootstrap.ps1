@@ -14,7 +14,14 @@ Write-Host "--- Optical Radar Bootstrap V3 ---" -ForegroundColor Cyan
 # 0. Check dependencies
 Write-Host "[0/6] Checking Dependencies..."
 Write-Host "  Checking Python requirements..."
-python -W ignore -c "import pkg_resources; pkg_resources.require(open('requirements.txt').read())" 2>$null
+$PyScript = @"
+import sys, pkg_resources
+try:
+    pkg_resources.require(open('requirements.txt').read())
+except Exception:
+    sys.exit(1)
+"@
+python -W ignore -c $PyScript 2>$null
 if ($LASTEXITCODE -ne 0) {
     Write-Host "  Missing Python packages. Installing..." -ForegroundColor Yellow
     python -m pip install -r requirements.txt
