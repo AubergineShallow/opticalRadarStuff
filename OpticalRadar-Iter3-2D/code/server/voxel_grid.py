@@ -179,25 +179,38 @@ class VoxelGrid:
         if _NATIVE_AVAILABLE:
             return self._add_ray_native(o2, d2, intensity, max_distance, step_size, camera_id)
 
-        # Pure Python fallback
+        # Pure Python fallback (Vectorized with NumPy)
         ttl = self._frame_count + self.config.contributor_ttl
-        updated = 0
-        t = 0.0
 
-        while t < max_distance:
-            pos = o2 + t * d2
-            ix = int((pos[0] - self.origin[0]) / self.config.resolution_m)
-            iy = int((pos[1] - self.origin[1]) / self.config.resolution_m)
+        # Precompute all t values
+        t_vals = np.arange(0, max_distance, step_size)
 
-            if self.is_valid_index(ix, iy):
-                self.grid[ix, iy] += intensity
-                if camera_id:
-                    self._contributors[(ix, iy)][camera_id] = ttl
-                updated += 1
+        # Calculate all positions [N, 2]
+        positions = o2 + t_vals[:, np.newaxis] * d2
 
-            t += step_size
+        # Convert to grid indices [N]
+        ixs = ((positions[:, 0] - self.origin[0]) / self.config.resolution_m).astype(int)
+        iys = ((positions[:, 1] - self.origin[1]) / self.config.resolution_m).astype(int)
 
-        return updated
+        # Filter valid indices
+        valid = (ixs >= 0) & (ixs < self.nx) & (iys >= 0) & (iys < self.ny)
+        valid_ixs = ixs[valid]
+        valid_iys = iys[valid]
+
+        if len(valid_ixs) == 0:
+            return 0
+
+        # Add heat
+        np.add.at(self.grid, (valid_ixs, valid_iys), intensity)
+
+        # Track contributors
+        if camera_id:
+            # Extract unique cells touched by the ray to ensure all are tracked
+            unique_cells = np.unique(np.column_stack((valid_ixs, valid_iys)), axis=0)
+            for ix, iy in unique_cells:
+                self._contributors[(ix, iy)][camera_id] = ttl
+
+        return len(valid_ixs)
 
     def _add_ray_native(
         self,
@@ -378,9 +391,10 @@ class VoxelGrid:
 
     def get_stats(self) -> dict:
         """Get grid statistics."""
-        hot_heat = int((self.grid >= self.config.hot_threshold).sum())
+        hot_indices = np.argwhere(self.grid >= self.config.hot_threshold)
+        hot_heat = len(hot_indices)
         hot_multi = sum(
-            1 for ix, iy in np.argwhere(self.grid >= self.config.hot_threshold)
+            1 for ix, iy in hot_indices
             if self._camera_count(ix, iy) >= self.config.min_cameras
         )
         return {
