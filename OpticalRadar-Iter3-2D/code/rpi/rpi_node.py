@@ -75,9 +75,18 @@ class RPiNode:
             fps=TARGET_FPS
         ))
         
-        self.gps = GPSReader(port=self.config.gps.port, mock=mock)
-        
-        self.imu = IMUReader(i2c_address=self.config.imu.i2c_address, mock=mock)
+        # GNSS and kinematic sensor disabled as they are fixed/static
+        self.gps = None
+        self.imu = None
+
+        # Additional Local Sensors (PIR, Touch, DHT11)
+        # Hardcoding based on network project files for now,
+        # since we know these are the components attached.
+        self.hardware = LocalHardwareManager(
+            enable_pir=True,
+            enable_touch=True,
+            enable_dht=True
+        )
         
         # Network
         self._socket: Optional[socket.socket] = None
@@ -126,11 +135,16 @@ class RPiNode:
         if not self.vision.start():
             print("Warning: Vision system failed to start")
         
-        if not self.gps.start():
+        if self.gps and not self.gps.start():
             print("Warning: GPS failed to start")
         
-        if not self.imu.start():
+        if self.imu and not self.imu.start():
             print("Warning: IMU failed to start")
+
+        try:
+            self.hardware.start()
+        except Exception as e:
+            print(f"Warning: Hardware manager failed to start: {e}")
         
         # Create UDP socket
         try:
@@ -247,8 +261,14 @@ class RPiNode:
         
         self._running = False
         self.vision.stop()
-        self.gps.stop()
-        self.imu.stop()
+        if self.gps:
+            self.gps.stop()
+        if self.imu:
+            self.imu.stop()
+        try:
+            self.hardware.stop()
+        except:
+            pass
         
         if self._http_server:
             self._http_server.shutdown()
@@ -267,7 +287,7 @@ class RPiNode:
         flags = 0
         
         # Bit 0: GPS signal/fix
-        if self.gps.has_fix():
+        if self.gps and self.gps.has_fix():
             flags |= 0x01
         
         # Bit 1: Camera OK
@@ -275,9 +295,28 @@ class RPiNode:
             flags |= 0x02
         
         # Bit 2: IMU OK
-        if self.imu.is_running:
+        if self.imu and self.imu.is_running:
             flags |= 0x04
-        
+
+        # Additional Sensors
+        try:
+            pir_motion, touch = self.hardware.get_digital_state()
+            temp, hum = self.hardware.get_climate()
+
+            # Bit 3: PIR Motion Detected
+            if pir_motion:
+                flags |= 0x08
+
+            # Bit 4: Touch Detected
+            if touch:
+                flags |= 0x10
+
+            # Bit 5: Temp/Humidity OK (non-zero reading)
+            if temp != 0.0 or hum != 0.0:
+                flags |= 0x20
+        except Exception:
+            pass
+
         return flags
         
     def _send_announce(self) -> bool:
@@ -328,16 +367,22 @@ class RPiNode:
                 print(f"Frame {self._frame_count}: No motion detected")
         
         # 2. Get GPS position
-        gps_fix = self.gps.get_fix()
-        if gps_fix:
-            lat, lon = gps_fix.latitude, gps_fix.longitude
-            alt = gps_fix.altitude  # Protocol-required field; unused in 2D tracking
+        if self.gps:
+            gps_fix = self.gps.get_fix()
+            if gps_fix:
+                lat, lon = gps_fix.latitude, gps_fix.longitude
+                alt = gps_fix.altitude  # Protocol-required field; unused in 2D tracking
+            else:
+                lat, lon, alt = 0.0, 0.0, 0.0
         else:
             lat, lon, alt = 0.0, 0.0, 0.0
         
         # 3. Get IMU orientation
-        orientation = self.imu.get_quaternion()
-        if orientation is None:
+        if self.imu:
+            orientation = self.imu.get_quaternion()
+            if orientation is None:
+                orientation = (1.0, 0.0, 0.0, 0.0)
+        else:
             orientation = (1.0, 0.0, 0.0, 0.0)
         
         # 4. Build packet
@@ -420,8 +465,8 @@ class RPiNode:
     
     def get_stats(self) -> dict:
         """Get node statistics."""
-        gps_fix = self.gps.get_fix()
-        orientation = self.imu.get_orientation()
+        gps_fix = self.gps.get_fix() if self.gps else None
+        orientation = self.imu.get_orientation() if self.imu else None
         
         return {
             'camera_id': self.camera_id,

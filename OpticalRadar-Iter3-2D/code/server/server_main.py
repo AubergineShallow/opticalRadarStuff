@@ -344,17 +344,27 @@ class OpticalRadarServer:
             elif rec_status == "unhealthy": status_val = 2
             elif rec_status == "offline": status_val = 3
 
+            # Parse hardware flags (PIR, Touch, Temp)
+            has_temp = bool(record.health_flags & 0x20)
+            has_touch = bool(record.health_flags & 0x10)
+            has_pir = bool(record.health_flags & 0x08)
+
+            # Map temp presence to a generic flag or value if applicable
             nodes.append({
                 "node_id": node_id,
                 "status": status_val,
                 "last_seen": record.last_packet_time,
                 "fps": record.packets_per_second,
                 "cpu_usage": 0.0,
-                "temp_c": 0.0,
+                "temp_c": 25.0 if has_temp else 0.0, # Placeholder 25.0 if sensor is connected, otherwise 0
                 "ip_address": record.ip_address,
                 "location": [0, 0],
                 "mode": record.mode,
-                "config": record.sensor_config
+                "config": {
+                    **(record.sensor_config or {}),
+                    "pir": has_pir,
+                    "touch": has_touch
+                }
             })
         self.ws_server.broadcast("NODE_UPDATE", nodes)
 

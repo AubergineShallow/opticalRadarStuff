@@ -100,6 +100,9 @@ class NodeHealthRecord:
         gps_ok = bool(self.health_flags & 0x01)
         camera_ok = bool(self.health_flags & 0x02)
         imu_ok = bool(self.health_flags & 0x04)
+        pir_ok = bool(self.health_flags & 0x08)
+        touch_ok = bool(self.health_flags & 0x10)
+        dht_ok = bool(self.health_flags & 0x20)
         
         if not (gps_ok and camera_ok):
             return NodeStatus.UNHEALTHY
