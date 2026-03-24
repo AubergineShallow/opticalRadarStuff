@@ -11,6 +11,26 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "--- Optical Radar Bootstrap V3 ---" -ForegroundColor Cyan
 
+# 0. Check dependencies
+Write-Host "[0/6] Checking Dependencies..."
+Write-Host "  Checking Python requirements..."
+python -c "import pkg_resources; pkg_resources.require(open('requirements.txt').read())" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  Missing Python packages. Installing..." -ForegroundColor Yellow
+    python -m pip install -r requirements.txt
+} else {
+    Write-Host "  Python dependencies satisfied." -ForegroundColor Green
+}
+Write-Host "  Checking Node.js requirements..."
+if (-not (Test-Path "$PSScriptRoot\NEW-UI-V2\node_modules")) {
+    Write-Host "  Missing node_modules. Installing..." -ForegroundColor Yellow
+    Push-Location "$PSScriptRoot\NEW-UI-V2"
+    npm install
+    Pop-Location
+} else {
+    Write-Host "  Node.js dependencies satisfied." -ForegroundColor Green
+}
+
 # 1. Discover Server IP (Physical Ethernet preferred)
 Write-Host "[1/6] Discovering Server IP..."
 $EthernetIP = (Get-NetIPAddress -AddressFamily IPv4 | Where-Object { 

@@ -9,6 +9,27 @@ $ErrorActionPreference = "Stop"
 
 Write-Host "--- Optical Radar Server Bootstrap ---" -ForegroundColor Cyan
 
+# ─── Step 0: Check Dependencies ──────────────────────────────────────────────
+Write-Host "[0/4] Checking Dependencies..."
+Write-Host "  Checking Python requirements..."
+python -c "import pkg_resources; pkg_resources.require(open('requirements.txt').read())" 2>$null
+if ($LASTEXITCODE -ne 0) {
+    Write-Host "  Missing Python packages. Installing..." -ForegroundColor Yellow
+    python -m pip install -r requirements.txt
+} else {
+    Write-Host "  Python dependencies satisfied." -ForegroundColor Green
+}
+
+Write-Host "  Checking Node.js requirements..."
+if (-not (Test-Path "$PSScriptRoot\NEW-UI-V2\node_modules")) {
+    Write-Host "  Missing node_modules. Installing..." -ForegroundColor Yellow
+    Push-Location "$PSScriptRoot\NEW-UI-V2"
+    npm install
+    Pop-Location
+} else {
+    Write-Host "  Node.js dependencies satisfied." -ForegroundColor Green
+}
+
 # ─── Step 1: Discover Server IP ──────────────────────────────────────────────
 Write-Host "[1/4] Discovering Server IP..."
 
@@ -42,7 +63,7 @@ Write-Host "  (Use this IP in the RPi's /home/pi/optical_radar/server.conf)" -Fo
 # ─── Step 2: Cleanup old processes ───────────────────────────────────────────
 Write-Host "[2/4] Cleaning up old processes (ports 5000, 5005, 5173, 5174)..."
 
-$Ports = @(5000, 5005, 5173, 5174)
+$Ports = @(5000, 5005, 3000)
 foreach ($Port in $Ports) {
     $ProcId = (Get-NetTCPConnection -LocalPort $Port -ErrorAction SilentlyContinue).OwningProcess
     if ($ProcId) {
@@ -76,11 +97,11 @@ Start-Process "cmd.exe" -ArgumentList "/c npm run dev" `
 # ─── Step 4: Open Dashboard ─────────────────────────────────────────────────
 Write-Host "[4/4] Opening Dashboard..."
 Start-Sleep -Seconds 3  # Give Vite a moment to start
-Start-Process "http://localhost:5173"
+Start-Process "http://localhost:3000"
 
 Write-Host ""
 Write-Host "--- Server Bootstrap Complete! ---" -ForegroundColor Cyan
-Write-Host "Dashboard:  http://localhost:5173"
+Write-Host "Dashboard:  http://localhost:3000"
 Write-Host "Server IP:  $EthernetIP (UDP port 5005)"
 Write-Host ""
 Write-Host "Make sure the RPi edge node knows this server IP." -ForegroundColor Yellow

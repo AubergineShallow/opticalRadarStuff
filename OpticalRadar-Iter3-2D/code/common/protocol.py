@@ -18,6 +18,7 @@ PACKET_TYPE_TELEMETRY = 0x01
 PACKET_TYPE_COMMAND = 0x02
 PACKET_TYPE_GROUND_TRUTH = 0x03
 PACKET_TYPE_ANNOUNCE = 0x04
+PACKET_TYPE_ENVIRONMENT = 0x05
 
 # Header size: 62 bytes for V3.1 (added mode byte)
 HEADER_SIZE = 62
@@ -350,6 +351,74 @@ class CommandPacket:
             command_type=command_type,
             payload=payload,
             signature=signature
+        )
+
+
+@dataclass
+class EnvironmentPacket:
+    """
+    Environmental sensor readings from an RPi node.
+    Carries temperature, humidity, PIR, fire alarm, and ultrasonic distance.
+    """
+    version: int = VERSION
+    packet_type: int = PACKET_TYPE_ENVIRONMENT
+    camera_id: str = ""
+    timestamp: float = 0.0
+
+    # Sensor readings
+    temperature_c: float = 0.0     # Celsius
+    humidity_pct: float = 0.0      # Percent [0, 100]
+    pir_active: bool = False       # PIR motion detected
+    fire_alarm: bool = False       # Fire alarm triggered
+    distance_cm: float = 0.0      # Ultrasonic distance (cm)
+
+    def pack(self) -> bytes:
+        """Pack environment packet.
+        Layout: version(1) + type(1) + cam_id(8) + timestamp(8) +
+                temp(4) + humidity(4) + pir(1) + fire(1) + distance(4) = 32 bytes
+        """
+        cam_id_bytes = self.camera_id.encode('utf-8')[:8].ljust(8, b'\x00')
+
+        data = struct.pack('>BB', self.version, self.packet_type)
+        data += cam_id_bytes
+        data += struct.pack('>d', self.timestamp)
+        data += struct.pack(
+            '>ffBBf',
+            self.temperature_c,
+            self.humidity_pct,
+            1 if self.pir_active else 0,
+            1 if self.fire_alarm else 0,
+            self.distance_cm
+        )
+        return data
+
+    @classmethod
+    def unpack(cls, data: bytes) -> 'EnvironmentPacket':
+        """Unpack environment packet from bytes."""
+        offset = 0
+        version, packet_type = struct.unpack_from('>BB', data, offset)
+        offset += 2
+
+        camera_id = data[offset:offset+8].rstrip(b'\x00').decode('utf-8')
+        offset += 8
+
+        timestamp, = struct.unpack_from('>d', data, offset)
+        offset += 8
+
+        temp_c, hum_pct, pir_raw, fire_raw, dist_cm = struct.unpack_from(
+            '>ffBBf', data, offset
+        )
+
+        return cls(
+            version=version,
+            packet_type=packet_type,
+            camera_id=camera_id,
+            timestamp=timestamp,
+            temperature_c=temp_c,
+            humidity_pct=hum_pct,
+            pir_active=bool(pir_raw),
+            fire_alarm=bool(fire_raw),
+            distance_cm=dist_cm
         )
 
 

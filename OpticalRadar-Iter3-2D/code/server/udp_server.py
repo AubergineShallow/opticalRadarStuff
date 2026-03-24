@@ -17,14 +17,14 @@ _parent = os.path.dirname(os.path.dirname(__file__))
 if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
-from common.protocol import TelemetryPacket, HEADER_SIZE, SIGNATURE_SIZE, PACKET_TYPE_ANNOUNCE, AnnouncePacket
+from common.protocol import TelemetryPacket, HEADER_SIZE, SIGNATURE_SIZE, PACKET_TYPE_ANNOUNCE, PACKET_TYPE_ENVIRONMENT, AnnouncePacket, EnvironmentPacket
 from common.constants import UDP_PORT, MAX_PACKET_SIZE, VERSION
 
 
 @dataclass
 class ReceivedPacket:
     """Received packet with metadata."""
-    packet: object  # TelemetryPacket or AnnouncePacket
+    packet: object  # TelemetryPacket, AnnouncePacket, or EnvironmentPacket
     sender_ip: str
     sender_port: int
     receive_time: float
@@ -166,6 +166,8 @@ class UDPServer:
                 pkt_type = data[1]
                 if pkt_type == PACKET_TYPE_ANNOUNCE:
                     packet = AnnouncePacket.unpack(data)
+                elif pkt_type == PACKET_TYPE_ENVIRONMENT:
+                    packet = EnvironmentPacket.unpack(data)
                 else:
                     packet = TelemetryPacket.unpack(data)
             except Exception:

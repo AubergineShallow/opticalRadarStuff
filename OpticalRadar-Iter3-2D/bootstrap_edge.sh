@@ -31,6 +31,15 @@ STREAM_PORT=8000
 
 echo "--- Optical Radar Edge Bootstrap ---"
 
+# ─── Step 0: Check Dependencies ──────────────────────────────────────────────
+echo "[0/4] Checking dependencies..."
+if ! python3 -c "import pkg_resources; pkg_resources.require(open('$INSTALL_DIR/requirements.txt').read())" 2>/dev/null; then
+    echo "  Missing Python packages. Installing..."
+    pip3 install -r "$INSTALL_DIR/requirements.txt"
+else
+    echo "  Python dependencies satisfied."
+fi
+
 # ─── Step 1: Resolve Server IP ──────────────────────────────────────────────
 # Priority: 1) server.conf  2) mDNS fallback  3) link-local scan
 echo "[1/4] Resolving server IP..."

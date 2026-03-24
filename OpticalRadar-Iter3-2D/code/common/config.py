@@ -73,6 +73,18 @@ class IMUConfig:
 
 
 @dataclass
+class SensorConfig:
+    """GPIO pin assignments and poll settings for environmental sensors."""
+    enabled: bool = False
+    dht_pin: int = 4               # BCM pin for DHT22 (temp+humidity)
+    pir_pin: int = 17              # BCM pin for PIR (HC-SR501)
+    fire_pin: int = 27             # BCM pin for fire alarm button
+    ultrasonic_trigger_pin: int = 23  # BCM pin for HC-SR04 trigger
+    ultrasonic_echo_pin: int = 24     # BCM pin for HC-SR04 echo
+    poll_interval_sec: float = 1.0    # How often to read sensors
+
+
+@dataclass
 class Config:
     """Root configuration object (2D fork)."""
     system: SystemConfig = field(default_factory=SystemConfig)
@@ -83,6 +95,7 @@ class Config:
     monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
     gps: GPSConfig = field(default_factory=GPSConfig)
     imu: IMUConfig = field(default_factory=IMUConfig)
+    sensors: SensorConfig = field(default_factory=SensorConfig)
 
 
 def _apply_env_overrides(config: Config) -> Config:
@@ -149,6 +162,8 @@ def load(path: Optional[str] = None) -> Config:
             config.gps = GPSConfig(**data['gps'])
         if 'imu' in data:
             config.imu = IMUConfig(**data['imu'])
+        if 'sensors' in data:
+            config.sensors = SensorConfig(**data['sensors'])
     
     # Apply environment overrides
     config = _apply_env_overrides(config)

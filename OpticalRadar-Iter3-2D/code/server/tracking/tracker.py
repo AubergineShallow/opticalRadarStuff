@@ -56,16 +56,21 @@ class Tracker:
         max_misses_to_delete: int = 30,
         max_tracks: int = 100,
         q_process_noise: float = 0.1,
-        r_measurement_noise: float = 2.0
+        r_measurement_noise: float = 2.0,
+        room_bounds: tuple = None,
+        boundary_margin: float = 0.5
     ):
         self.distance_threshold = distance_threshold
+        self.room_bounds = room_bounds  # (half_width, half_depth) in meters
+        self.boundary_margin = boundary_margin
 
         self._track_manager = TrackManager(
             min_hits_to_confirm=min_hits_to_confirm,
             max_misses_to_delete=max_misses_to_delete,
             max_tracks=max_tracks,
             q_process_noise=q_process_noise,
-            r_measurement_noise=r_measurement_noise
+            r_measurement_noise=r_measurement_noise,
+            room_bounds=room_bounds
         )
 
         self._last_update_time: Optional[float] = None
@@ -103,6 +108,14 @@ class Tracker:
             track_ids.append(track.track_id)
 
         measurements = [d.position for d in detections]
+
+        # Layer 2: Prune tracks that escaped room bounds
+        if self.room_bounds:
+            self._prune_out_of_bounds(track_ids, predicted_positions)
+            # Rebuild lists after pruning (some tracks may be deleted)
+            active_tracks = self._track_manager.active_tracks
+            predicted_positions = [t.position for t in active_tracks]
+            track_ids = [t.track_id for t in active_tracks]
 
         matches, unmatched_tracks, unmatched_dets = associate(
             predicted_positions,
@@ -193,3 +206,19 @@ class Tracker:
             Dict of track_id -> predicted position [x, y]
         """
         return self._track_manager.get_predicted_positions(dt)
+
+    def _prune_out_of_bounds(
+        self,
+        track_ids: List[int],
+        predicted_positions: List[np.ndarray]
+    ) -> None:
+        """
+        Layer 2: Hard-delete tracks whose predicted position exceeds room bounds + margin.
+        """
+        hw, hd = self.room_bounds
+        margin = self.boundary_margin
+        for tid, pos in zip(track_ids, predicted_positions):
+            x, y = float(pos[0]), float(pos[1])
+            if x < -(hw + margin) or x > (hw + margin) or \
+               y < -(hd + margin) or y > (hd + margin):
+                self._track_manager.delete_track(tid)

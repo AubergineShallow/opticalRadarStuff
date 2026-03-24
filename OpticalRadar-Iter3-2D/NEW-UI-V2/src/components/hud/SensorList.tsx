@@ -1,8 +1,8 @@
 import React, { useState } from 'react';
-import { NodeHealthRecord } from '../../../store/types';
+import { NodeHealth } from '../../types';
 
 interface SensorListProps {
-    nodes: Record<string, NodeHealthRecord>;
+    nodes: Record<string, NodeHealth>;
     selectedNodeId: string | null;
     onSelectNode: (id: string | null) => void;
 }

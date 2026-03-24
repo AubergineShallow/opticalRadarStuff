@@ -21,3 +21,10 @@ grid:
 tracking:
   min_hits_to_confirm: 3
   max_misses_to_delete: 30
+
+sensors:
+  enabled: true
+  dht_pin: 17
+  pir_pin: 6
+  fire_pin: 5
+  poll_interval_sec: 1.0

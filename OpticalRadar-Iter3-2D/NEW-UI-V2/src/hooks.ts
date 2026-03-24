@@ -111,6 +111,7 @@ export function useMockData(enabled: boolean = true) {
                 temp_c: 52,
                 ip_address: "192.168.1.x",
                 location: sensor.pos,
+                mode: 0,
                 config: {
                     azimuth_deg: sensor.facing,
                     fov_deg: sensor.fov,

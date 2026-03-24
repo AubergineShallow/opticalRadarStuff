@@ -1,12 +1,13 @@
 {
-  "name": "optical-radar-ui",
+  "name": "smart-security-dashboard",
   "private": true,
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 0.0.0.0 --port 3000",
     "build": "vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "start": "vite --host 0.0.0.0 --port 3000"
   },
   "dependencies": {
     "react": "^18.3.1",
@@ -17,13 +18,18 @@
     "@deck.gl/core": "^9.0.0",
     "@deck.gl/layers": "^9.0.0",
     "@deck.gl/geo-layers": "^9.0.0",
-    "@deck.gl/react": "^9.0.0"
+    "@deck.gl/react": "^9.0.0",
+    "recharts": "^2.12.0",
+    "clsx": "^2.1.1",
+    "tailwind-merge": "^2.2.2"
   },
   "devDependencies": {
     "@types/react": "^18.2.66",
     "@types/react-dom": "^18.2.22",
     "@vitejs/plugin-react": "^4.2.1",
     "typescript": "^5.2.2",
-    "vite": "^5.2.0"
+    "vite": "^5.2.0",
+    "tailwindcss": "^4.1.12",
+    "@tailwindcss/vite": "^4.1.12"
   }
 }

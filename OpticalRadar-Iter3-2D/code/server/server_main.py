@@ -19,7 +19,11 @@ if _parent_dir not in sys.path:
     sys.path.insert(0, _parent_dir)
 
 from common.config import load as load_config, Config
-from common.protocol import TelemetryPacket, PACKET_TYPE_TELEMETRY, PACKET_TYPE_GROUND_TRUTH, PACKET_TYPE_ANNOUNCE, AnnouncePacket
+from common.protocol import (
+    TelemetryPacket, PACKET_TYPE_TELEMETRY, PACKET_TYPE_GROUND_TRUTH,
+    PACKET_TYPE_ANNOUNCE, PACKET_TYPE_ENVIRONMENT,
+    AnnouncePacket, EnvironmentPacket
+)
 
 # Use try/except for both module and direct execution support
 try:
@@ -141,14 +145,17 @@ class OpticalRadarServer:
         )
         self.voxel_grid = VoxelGrid(grid_config)
 
-        # Tracker
+        # Tracker (with room bounds for boundary enforcement)
+        room_bounds = (self.config.grid.width_m / 2, self.config.grid.depth_m / 2)
         self.tracker = Tracker(
             distance_threshold=self.config.tracking.distance_threshold_m,
             min_hits_to_confirm=self.config.tracking.min_hits_to_confirm,
             max_misses_to_delete=self.config.tracking.max_misses_to_delete,
             max_tracks=self.config.tracking.max_tracks,
             q_process_noise=self.config.tracking.q_process_noise,
-            r_measurement_noise=self.config.tracking.r_measurement_noise
+            r_measurement_noise=self.config.tracking.r_measurement_noise,
+            room_bounds=room_bounds,
+            boundary_margin=0.5
         )
 
         # Validation
@@ -183,6 +190,10 @@ class OpticalRadarServer:
         self._start_time = time.time()
         self._last_frame_time = 0.0
         self._fps = 0.0
+
+        # Environment sensor state per node
+        self._env_state: dict = {}   # {camera_id: EnvironmentPacket}
+        self._room_bounds = room_bounds
 
     def _on_health_change(self, node_id: str, old_status, new_status) -> None:
         """Handle node health status change."""
@@ -254,6 +265,13 @@ class OpticalRadarServer:
         # Extract detections from grid
         with Timer(METRIC_VOXEL_UPDATE_TIME):
             detection_positions = self.voxel_grid.get_detections()
+
+        # Layer 1: Detection gate — filter out-of-bounds detections
+        half_w, half_d = self._room_bounds
+        detection_positions = [
+            pos for pos in detection_positions
+            if -half_w <= pos[0] <= half_w and -half_d <= pos[1] <= half_d
+        ]
 
         # Convert to Detection objects
         detections = [
@@ -357,6 +375,18 @@ class OpticalRadarServer:
             })
         self.ws_server.broadcast("NODE_UPDATE", nodes)
 
+        # 4. Environmental sensor data
+        for cam_id, env_pkt in self._env_state.items():
+            self.ws_server.broadcast("ENV_UPDATE", {
+                "node_id": cam_id,
+                "temperature_c": round(env_pkt.temperature_c, 1),
+                "humidity_pct": round(env_pkt.humidity_pct, 1),
+                "pir_active": env_pkt.pir_active,
+                "fire_alarm": env_pkt.fire_alarm,
+                "distance_cm": round(env_pkt.distance_cm, 1),
+                "timestamp": env_pkt.timestamp
+            })
+
     def _process_packet(self, packet: object, receive_time: float, ip_address: str = "unknown") -> None:
         """Process a single telemetry packet based on its type."""
         if packet.packet_type == PACKET_TYPE_GROUND_TRUTH:
@@ -365,6 +395,10 @@ class OpticalRadarServer:
 
         if packet.packet_type == PACKET_TYPE_ANNOUNCE:
             self._process_announce_packet(packet, ip_address)
+            return
+
+        if packet.packet_type == PACKET_TYPE_ENVIRONMENT:
+            self._process_environment_packet(packet, ip_address)
             return
 
         if packet.packet_type == PACKET_TYPE_TELEMETRY:
@@ -393,6 +427,11 @@ class OpticalRadarServer:
             )
             
         self.logger.info("network", f"Received announcement from {packet.camera_id}")
+
+    def _process_environment_packet(self, packet: EnvironmentPacket, ip_address: str = "unknown") -> None:
+        """Process environment sensor packet from RPi node."""
+        self._env_state[packet.camera_id] = packet
+        self.logger.debug("sensors", f"Env update from {packet.camera_id}: {packet.temperature_c:.1f}°C, {packet.humidity_pct:.1f}%")
 
     def _process_ground_truth_packet(self, packet: TelemetryPacket) -> None:
         """Process ground truth packet for validation."""

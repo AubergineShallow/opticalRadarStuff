@@ -73,11 +73,13 @@ class TrackManager:
         max_misses_to_delete: int = 30,
         max_tracks: int = 100,
         q_process_noise: float = 0.1,
-        r_measurement_noise: float = 2.0
+        r_measurement_noise: float = 2.0,
+        room_bounds: tuple = None
     ):
         self.min_hits = min_hits_to_confirm
         self.max_misses = max_misses_to_delete
         self.max_tracks = max_tracks
+        self.room_bounds = room_bounds  # (half_width, half_depth)
 
         self._tracks: Dict[int, Track] = {}
         self._next_id: int = 1
@@ -178,6 +180,7 @@ class TrackManager:
         updated, _ = self._kalman.update(track.kalman_state, measurement)
 
         track.kalman_state = updated
+        self._clamp_to_room(track)
         track.hits += 1
         track.misses = 0
         track.age += 1
@@ -203,9 +206,18 @@ class TrackManager:
             return None
 
         track.kalman_state = self._kalman.predict(track.kalman_state, dt)
+        self._clamp_to_room(track)
         track.age += 1
 
         return track
+
+    def _clamp_to_room(self, track: Track) -> None:
+        """Layer 3: Clip track position to room walls to prevent wall-hugging drift."""
+        if not self.room_bounds:
+            return
+        hw, hd = self.room_bounds
+        track.kalman_state.x[0] = np.clip(track.kalman_state.x[0], -hw, hw)
+        track.kalman_state.x[1] = np.clip(track.kalman_state.x[1], -hd, hd)
 
     def mark_missed(self, track_id: int) -> Optional[Track]:
         """Mark track as missed (no detection this frame)."""

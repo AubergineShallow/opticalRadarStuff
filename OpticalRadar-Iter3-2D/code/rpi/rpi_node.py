@@ -20,11 +20,12 @@ if _parent not in sys.path:
 
 from common.config import load as load_config
 from common.constants import UDP_PORT, TARGET_FPS, PROTOCOL_VERSION
-from common.protocol import TelemetryPacket, MotionVector as ProtocolMotionVector, AnnouncePacket
+from common.protocol import TelemetryPacket, MotionVector as ProtocolMotionVector, AnnouncePacket, EnvironmentPacket
 
 from .vision import VisionSystem, VisionConfig
 from .gps import GPSReader
 from .imu import IMUReader
+from .sensors import SensorReader
 
 
 class RPiNode:
@@ -79,6 +80,17 @@ class RPiNode:
         
         self.imu = IMUReader(i2c_address=self.config.imu.i2c_address, mock=mock)
         
+        # Environmental sensors
+        self.sensors = SensorReader(
+            dht_pin=self.config.sensors.dht_pin,
+            pir_pin=self.config.sensors.pir_pin,
+            fire_pin=self.config.sensors.fire_pin,
+            trigger_pin=self.config.sensors.ultrasonic_trigger_pin,
+            echo_pin=self.config.sensors.ultrasonic_echo_pin,
+            poll_interval=self.config.sensors.poll_interval_sec,
+            mock=mock or not self.config.sensors.enabled
+        )
+        
         # Network
         self._socket: Optional[socket.socket] = None
         
@@ -87,6 +99,7 @@ class RPiNode:
         self._sequence = 0
         self._frame_count = 0
         self._last_announce_time = 0.0
+        self._last_env_time = 0.0
         
         # New: Mode & Streaming
         self.mode = "tracking"  # "tracking" or "stream"
@@ -131,6 +144,9 @@ class RPiNode:
         
         if not self.imu.start():
             print("Warning: IMU failed to start")
+        
+        if not self.sensors.start():
+            print("Warning: Environmental sensors failed to start")
         
         # Create UDP socket
         try:
@@ -249,6 +265,7 @@ class RPiNode:
         self.vision.stop()
         self.gps.stop()
         self.imu.stop()
+        self.sensors.stop()
         
         if self._http_server:
             self._http_server.shutdown()
@@ -405,6 +422,12 @@ class RPiNode:
                 self._send_announce()
                 self._last_announce_time = time.time()
             
+            # Periodic environment packet (every poll_interval)
+            env_interval = self.config.sensors.poll_interval_sec
+            if time.time() - self._last_env_time > env_interval:
+                self._send_environment()
+                self._last_env_time = time.time()
+            
             if self.mode == "tracking":
                 self.process_frame()
             elif self.mode == "stream":
@@ -425,10 +448,36 @@ class RPiNode:
         
         print("Node stopped")
     
+    def _send_environment(self) -> bool:
+        """Send environment sensor packet to server."""
+        if not self._socket:
+            return False
+        
+        reading = self.sensors.get_reading()
+        
+        packet = EnvironmentPacket(
+            camera_id=self.camera_id,
+            timestamp=time.time(),
+            temperature_c=reading.temperature_c,
+            humidity_pct=reading.humidity_pct,
+            pir_active=reading.pir_active,
+            fire_alarm=reading.fire_alarm,
+            distance_cm=reading.distance_cm
+        )
+        
+        try:
+            data = packet.pack()
+            self._socket.sendto(data, (self.server_address, self.server_port))
+            return True
+        except Exception as e:
+            print(f"Environment packet send failed: {e}")
+            return False
+
     def get_stats(self) -> dict:
         """Get node statistics."""
         gps_fix = self.gps.get_fix()
         orientation = self.imu.get_orientation()
+        env = self.sensors.get_reading()
         
         return {
             'camera_id': self.camera_id,
@@ -439,7 +488,12 @@ class RPiNode:
             'roll': orientation.roll if orientation else 0,
             'pitch': orientation.pitch if orientation else 0,
             'yaw': orientation.yaw if orientation else 0,
-            'health_flags': self._get_health_flags()
+            'health_flags': self._get_health_flags(),
+            'temperature_c': env.temperature_c,
+            'humidity_pct': env.humidity_pct,
+            'pir_active': env.pir_active,
+            'fire_alarm': env.fire_alarm,
+            'distance_cm': env.distance_cm
         }
 
 
