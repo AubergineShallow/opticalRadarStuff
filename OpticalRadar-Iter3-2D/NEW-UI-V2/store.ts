@@ -56,22 +56,38 @@ export const useAppStore = create<AppState>((set) => ({
 
     // Actions
     setTracks: (newTracks) => set((state) => {
-        const tracks = { ...state.tracks };
-        newTracks.forEach(t => {
+        let changed = false;
+        const nextTracks = { ...state.tracks };
+
+        for (const t of newTracks) {
             if (t.state === TrackState.DELETED) {
-                delete tracks[t.track_id];
+                if (nextTracks[t.track_id]) {
+                    delete nextTracks[t.track_id];
+                    changed = true;
+                }
             } else {
-                const prev = tracks[t.track_id];
-                const history = prev?.history || [];
-                // Only push if position changed significantly to avoid crowding, or just push.
+                const prev = nextTracks[t.track_id];
+
+                // Skip update if position and state haven't changed to avoid unnecessary re-renders
+                if (prev &&
+                    prev.position[0] === t.position[0] &&
+                    prev.position[1] === t.position[1] &&
+                    prev.state === t.state) {
+                    continue;
+                }
+
+                const history = prev?.history ? [...prev.history] : [];
                 if (prev) {
                     history.push(prev.position);
                     if (history.length > 30) history.shift(); // Max 30 points
                 }
-                tracks[t.track_id] = { ...t, history };
+
+                nextTracks[t.track_id] = { ...t, history };
+                changed = true;
             }
-        });
-        return { tracks };
+        }
+
+        return changed ? { tracks: nextTracks } : state;
     }),
 
     setRays: (rays) => set({ rays }),

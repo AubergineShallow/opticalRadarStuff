@@ -292,19 +292,20 @@ class OpticalRadarServer:
 
         # Broadcast state via WebSocket
         if self.ws_server:
+            # Cache grid stats once per frame
+            grid_stats = self.voxel_grid.get_stats()
+
             # DEBUG
             if self._frame_count % 30 == 0:
-                grid_stats = self.voxel_grid.get_stats()
                 # Log all known node IPs in heartbeat
                 node_ips = [r.ip_address for r in self.node_health.get_all_nodes().values()]
                 print(f"[Server] FPS: {self._fps:.1f} | Active Tracks: {len(result.tracks)} | Hot Voxels: {grid_stats['hot_count_verified']} | Nodes: {node_ips}")
             
-            self._broadcast_state()
+            self._broadcast_state(grid_stats)
 
-    def _broadcast_state(self) -> None:
+    def _broadcast_state(self, grid_stats: dict) -> None:
         """Broadcast system state to UI (2D positions)."""
         # 1. System Status
-        grid_stats = self.voxel_grid.get_stats()
         self.ws_server.broadcast("SYSTEM_STATUS", {
             "server_fps": round(self._fps, 1),
             "total_tracks": len(self.tracker.get_confirmed_tracks()),

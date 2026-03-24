@@ -313,8 +313,13 @@ class RPiNode:
         self._frame_count += 1
         
         # 1. Capture and detect motion
-        frame, vectors = self.vision.get_frame_and_vectors()
+        frame, vectors = self.vision.get_frame_and_vectors(bgr_out=(self.mode == "stream"))
         
+        # In stream mode, save the frame for the HTTP server
+        if self.mode == "stream" and frame is not None:
+            with self._stream_lock:
+                self._latest_rgb_frame = frame
+
         # DEBUG: Print vector count
         if len(vectors) > 0:
             print(f"Motion Frame: Detected {len(vectors)} motion vectors")
@@ -364,13 +369,6 @@ class RPiNode:
         # 5. Send packet
         return self._send_packet(packet)
         
-    def process_stream_frame(self) -> None:
-        """Capture a frame strictly for the HTTP stream."""
-        frame = self.vision.capture_frame()
-        if frame is not None:
-            with self._stream_lock:
-                self._latest_rgb_frame = frame
-    
     def _send_packet(self, packet: TelemetryPacket) -> bool:
         """Send packet to server."""
         if not self._socket:
@@ -405,14 +403,9 @@ class RPiNode:
                 self._send_announce()
                 self._last_announce_time = time.time()
             
-            if self.mode == "tracking":
+            if self.mode == "tracking" or self.mode == "stream":
+                # process_frame handles capturing, processing, telemetry, and stream buffer updating
                 self.process_frame()
-            elif self.mode == "stream":
-                # Still process frame to send telemetry (mode sync), but skip motion vector logic?
-                # Actually, process_frame already handles both if we modify it.
-                # Let's keep them separate but ensure telemetry is sent.
-                self.process_stream_frame()
-                self.process_frame() # Send telemetry with mode=1
             else:
                 print(f"Unknown mode: {self.mode}")
                 time.sleep(1.0)

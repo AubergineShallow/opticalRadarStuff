@@ -59,6 +59,10 @@ class VisionSystem:
         self._running = False
         self._backend = None  # 'picamera2', 'opencv', or None
         
+        # Precompute trigonometric constants for rectilinear projection
+        self._half_h_tan = math.tan(math.radians(self.config.horizontal_fov / 2))
+        self._half_v_tan = math.tan(math.radians(self.config.vertical_fov / 2))
+
         # Try to import OpenCV
         try:
             import cv2
@@ -146,12 +150,15 @@ class VisionSystem:
         self._prev_frame = None
         self._backend = None
     
-    def capture_frame(self) -> Optional[np.ndarray]:
+    def capture_frame(self, bgr_out: bool = True) -> Optional[np.ndarray]:
         """
         Capture a single frame.
         
+        Args:
+            bgr_out: If True, returns BGR frame. If False, avoids converting RGB to BGR if possible.
+
         Returns:
-            Frame as numpy array (BGR for OpenCV compat) or None
+            Frame as numpy array or None
         """
         if not self._enabled:
             # Return mock frame
@@ -159,9 +166,9 @@ class VisionSystem:
         
         if self._backend == 'picamera2' and self._picam2:
             try:
-                # picamera2 returns RGB; convert to BGR for OpenCV compat
+                # picamera2 returns RGB
                 frame_rgb = self._picam2.capture_array()
-                if self._cv2 is not None:
+                if bgr_out and self._cv2 is not None:
                     return self._cv2.cvtColor(frame_rgb, self._cv2.COLOR_RGB2BGR)
                 return frame_rgb
             except Exception:
@@ -169,16 +176,22 @@ class VisionSystem:
         
         if self._backend == 'opencv' and self._camera:
             ret, frame = self._camera.read()
-            return frame if ret else None
+            if not ret:
+                return None
+            if not bgr_out and self._cv2 is not None:
+                # OpenCV returns BGR, convert to RGB if not requesting BGR
+                return self._cv2.cvtColor(frame, self._cv2.COLOR_BGR2RGB)
+            return frame
         
         return None
     
-    def detect_motion(self, frame: np.ndarray) -> List[MotionVector]:
+    def detect_motion(self, frame: np.ndarray, is_bgr: bool = True) -> List[MotionVector]:
         """
         Detect motion in frame.
         
         Args:
             frame: Current frame
+            is_bgr: Whether the input frame is BGR format
         
         Returns:
             List of motion vectors
@@ -189,7 +202,11 @@ class VisionSystem:
         cv2 = self._cv2
         
         # Convert to grayscale
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        if is_bgr:
+            gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        else:
+            gray = cv2.cvtColor(frame, cv2.COLOR_RGB2GRAY)
+
         gray = cv2.GaussianBlur(gray, (self.config.blur_size, self.config.blur_size), 0)
         
         # Initialize if first frame
@@ -269,26 +286,26 @@ class VisionSystem:
         # Rectilinear projection: atan(nx * 2 * tan(fov/2))
         # This is the standard pinhole camera model, correcting for
         # the ~2.8° error at edges that the linear approximation introduces.
-        half_h_tan = math.tan(math.radians(self.config.horizontal_fov / 2))
-        half_v_tan = math.tan(math.radians(self.config.vertical_fov / 2))
-        
-        azimuth = math.degrees(math.atan(2 * nx * half_h_tan))
-        elevation = math.degrees(math.atan(2 * ny * half_v_tan))
+        azimuth = math.degrees(math.atan(2 * nx * self._half_h_tan))
+        elevation = math.degrees(math.atan(2 * ny * self._half_v_tan))
         
         return (azimuth, elevation)
     
-    def get_frame_and_vectors(self) -> Tuple[Optional[np.ndarray], List[MotionVector]]:
+    def get_frame_and_vectors(self, bgr_out: bool = True) -> Tuple[Optional[np.ndarray], List[MotionVector]]:
         """
         Capture frame and detect motion in one call.
         
+        Args:
+            bgr_out: Whether to return the frame in BGR format
+
         Returns:
             Tuple of (frame, vectors)
         """
-        frame = self.capture_frame()
+        frame = self.capture_frame(bgr_out=bgr_out)
         if frame is None:
             return None, []
         
-        vectors = self.detect_motion(frame)
+        vectors = self.detect_motion(frame, is_bgr=bgr_out)
         return frame, vectors
     
     @property

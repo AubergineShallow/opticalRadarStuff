@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import DeckGL from '@deck.gl/react';
 import { useAppStore } from '../../store';
 import { UI_CONFIG, ROOM_CONFIG } from '../../constants';
@@ -29,10 +29,13 @@ export default function VisualizationMap() {
         bearing: 0
     });
 
+    // Memoize static room layers so they are not recreated every render
+    const roomLayers = useMemo(() => createRoomLayers(), []);
+
     // --- LAYERS ---
     const layers = [
         // Room Environment (Floor, Grid, Walls)
-        ...createRoomLayers(),
+        ...roomLayers,
 
         // FOV Cones (Below nodes, above floor)
         createFOVLayer(Object.values(nodes)),

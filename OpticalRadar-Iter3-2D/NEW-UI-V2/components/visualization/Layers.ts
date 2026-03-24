@@ -130,7 +130,7 @@ export function createNodeLayer(props: NodeLayerProps) {
             }
         },
         updateTriggers: {
-            getFillColor: [data]
+            getFillColor: [data.length, data.map(d => d.status).join(',')]
         }
     });
 }
@@ -193,7 +193,7 @@ export function createVoxelLayer(props: VoxelLayerProps) {
         pickable: true,
         material: false,
         updateTriggers: {
-            getFillColor: [data]
+            getFillColor: [data.length]
         }
     });
 }
@@ -227,7 +227,7 @@ export function createTrackLayers(props: TrackLayerProps) {
             }
         },
         updateTriggers: {
-            getPosition: [data],
+            getPosition: [data.length],
             getFillColor: [selectedTrackId],
             getRadius: [selectedTrackId]
         }
@@ -251,8 +251,8 @@ export function createTrackLayers(props: TrackLayerProps) {
         backgroundColor: [0, 0, 0, 150],
         backgroundPadding: [2, 1],
         updateTriggers: {
-            getPosition: [data],
-            getText: [data]
+            getPosition: [data.length],
+            getText: [data.length]
         }
     });
 
@@ -282,7 +282,7 @@ export function createTrackHistoryLayer(props: TrackHistoryLayerProps) {
         widthUnits: 'meters',
         pickable: false,
         updateTriggers: {
-            getPath: [data]
+            getPath: [data.length]
         }
     });
 }
@@ -312,8 +312,8 @@ export function createVelocityVectorLayer(props: VelocityVectorLayerProps) {
         widthUnits: 'pixels',
         pickable: false,
         updateTriggers: {
-            getSourcePosition: [data],
-            getTargetPosition: [data]
+            getSourcePosition: [data.length],
+            getTargetPosition: [data.length]
         }
     });
 }
