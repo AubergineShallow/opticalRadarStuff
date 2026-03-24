@@ -491,6 +491,7 @@ def main():
     parser.add_argument("--port", "-p", type=int, default=UDP_PORT, help="Server port")
     parser.add_argument("--config", "-c", help="Config file path")
     parser.add_argument("--mock", "-m", action="store_true", help="Use mock sensors")
+    parser.add_argument("--mode", default="tracking", choices=["tracking", "stream"], help="Operating mode")
     
     args = parser.parse_args()
     
@@ -501,6 +502,7 @@ def main():
         config_path=args.config,
         mock=args.mock
     )
+    node.mode = args.mode
     
     node.run()
 

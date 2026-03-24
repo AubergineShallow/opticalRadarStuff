@@ -21,25 +21,31 @@ set -e
 # ─── Configuration ───────────────────────────────────────────────────────────
 INSTALL_DIR="/home/pi/optical_radar"
 CODE_DIR="$INSTALL_DIR/code"
-CONF_FILE="$INSTALL_DIR/server.conf"
+SERVER_CONF_FILE="$INSTALL_DIR/server.conf"
+NODE_CONF_FILE="$INSTALL_DIR/node.conf"
 NODE_LOG="$INSTALL_DIR/node.log"
-STREAM_LOG="$INSTALL_DIR/stream.log"
 
+# Default Camera ID if node.conf is missing
 CAMERA_ID="cam_pi"
+if [ -f "$NODE_CONF_FILE" ]; then
+    CAMERA_ID=$(head -1 "$NODE_CONF_FILE" | tr -d '[:space:]')
+fi
+
 SERVER_PORT=5005
 STREAM_PORT=8000
 
 echo "--- Optical Radar Edge Bootstrap ---"
+echo "  Camera ID: $CAMERA_ID"
 
 # ─── Step 1: Resolve Server IP ──────────────────────────────────────────────
-# Priority: 1) server.conf  2) mDNS fallback  3) link-local scan
+# Priority: 1) server.conf  2) mDNS fallback  3) gateway scan
 echo "[1/4] Resolving server IP..."
 
 SERVER_IP=""
 
 # Method 1: Config file (recommended)
-if [ -f "$CONF_FILE" ]; then
-    SERVER_IP=$(head -1 "$CONF_FILE" | tr -d '[:space:]')
+if [ -f "$SERVER_CONF_FILE" ]; then
+    SERVER_IP=$(head -1 "$SERVER_CONF_FILE" | tr -d '[:space:]')
     if [ -n "$SERVER_IP" ]; then
         echo "  Server IP from config: $SERVER_IP"
     fi
@@ -59,11 +65,11 @@ if [ -z "$SERVER_IP" ]; then
     done
 fi
 
-# Method 3: Link-local gateway (common for direct Ethernet)
+# Method 3: Gateway fallback (Wi-Fi or Ethernet)
 if [ -z "$SERVER_IP" ]; then
-    echo "  mDNS failed. Trying link-local gateway..."
-    # Get the default gateway on the ethernet interface
-    GW=$(ip route show dev eth0 2>/dev/null | grep -oP 'via \K[\d.]+' | head -1)
+    echo "  mDNS failed. Trying default gateway..."
+    # Get the default gateway on any active interface (wlan0 or eth0)
+    GW=$(ip route show default 2>/dev/null | grep -oP 'via \K[\d.]+' | head -1)
     if [ -n "$GW" ]; then
         SERVER_IP="$GW"
         echo "  Using gateway: $SERVER_IP"
@@ -72,8 +78,8 @@ fi
 
 if [ -z "$SERVER_IP" ]; then
     echo "ERROR: Could not determine server IP address."
-    echo "  Please create $CONF_FILE with the server's IP address."
-    echo "  Example: echo '169.254.9.75' > $CONF_FILE"
+    echo "  Please create $SERVER_CONF_FILE with the server's IP address."
+    echo "  Example: echo '192.168.1.100' > $SERVER_CONF_FILE"
     exit 1
 fi
 
@@ -99,29 +105,23 @@ echo "  Installation OK: $CODE_DIR"
 echo "[3/4] Cleaning up old processes..."
 
 pkill -f "python3 -m rpi.rpi_node" 2>/dev/null && echo "  Killed old rpi_node" || true
-pkill -f "stream.py" 2>/dev/null && echo "  Killed old stream" || true
 sleep 1
 
 # ─── Step 4: Launch Edge Node + Camera Stream ───────────────────────────────
-echo "[4/4] Launching edge node and camera stream..."
+echo "[4/4] Launching edge node (tracking + streaming)..."
 
 cd "$CODE_DIR"
 export PYTHONPATH="$CODE_DIR"
 
-# Start the edge node (motion detection + telemetry)
+# Start the edge node (motion detection + telemetry + HTTP stream)
 nohup python3 -m rpi.rpi_node \
     --id "$CAMERA_ID" \
     --server "$SERVER_IP" \
     --port "$SERVER_PORT" \
+    --mode "stream" \
     > "$NODE_LOG" 2>&1 &
 NODE_PID=$!
 echo "  RPi Node started (PID: $NODE_PID) -> $NODE_LOG"
-
-# Start the camera stream server (MJPEG on port 8000)
-nohup python3 "$CODE_DIR/stream.py" \
-    > "$STREAM_LOG" 2>&1 &
-STREAM_PID=$!
-echo "  Stream started (PID: $STREAM_PID) -> $STREAM_LOG"
 
 # Brief health check
 sleep 2
@@ -131,15 +131,9 @@ else
     echo "  [FAIL] RPi Node exited early. Check $NODE_LOG"
 fi
 
-if kill -0 "$STREAM_PID" 2>/dev/null; then
-    echo "  [OK] Stream is running on port $STREAM_PORT"
-else
-    echo "  [FAIL] Stream exited early. Check $STREAM_LOG"
-fi
-
 echo ""
 echo "--- Edge Bootstrap Complete! ---"
+echo "  Camera ID:     $CAMERA_ID"
 echo "  Server target: $SERVER_IP:$SERVER_PORT"
 echo "  Stream:        http://$(hostname -I | awk '{print $1}'):$STREAM_PORT"
 echo "  Node log:      $NODE_LOG"
-echo "  Stream log:    $STREAM_LOG"

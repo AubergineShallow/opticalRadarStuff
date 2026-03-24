@@ -116,10 +116,10 @@ def test_protocol():
     check("Command pack/unpack", test_command_roundtrip)
     
     def test_header_size():
-        assert HEADER_SIZE == 61, f"Expected 61, got {HEADER_SIZE}"
+        assert HEADER_SIZE == 62, f"Expected 62, got {HEADER_SIZE}"
         return True
     
-    check("Header size == 61 (uint16 vector_count)", test_header_size)
+    check("Header size == 62 (uint16 vector_count)", test_header_size)
     
     def test_large_vector_count():
         vectors = [
