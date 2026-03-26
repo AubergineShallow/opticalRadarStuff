@@ -329,6 +329,9 @@ class OpticalRadarServer:
             elif rec_status == "degraded": status_val = 1
             elif rec_status == "unhealthy": status_val = 2
             elif rec_status == "offline": status_val = 3
+
+            cam_pos = self.ray_builder.get_camera_position(node_id)
+            location = cam_pos.tolist() if cam_pos is not None else [0.0, 0.0, 0.0]
             
             nodes.append({
                 "node_id": node_id,
@@ -338,7 +341,7 @@ class OpticalRadarServer:
                 "cpu_usage": 0.0,
                 "temp_c": 0.0,
                 "ip_address": "unknown",
-                "location": [0,0,0], # TODO: Link to ray_builder camera positions
+                "location": location,
                 # Extra config fields can be merged if frontend supports them
                 "config": record.sensor_config
             })
