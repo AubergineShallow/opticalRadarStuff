@@ -6,7 +6,6 @@ falling back to pure Python if not available.
 """
 
 import numpy as np
-from typing import List, Tuple, Optional
 
 # Try to import native module
 try:
