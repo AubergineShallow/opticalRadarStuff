@@ -9,7 +9,6 @@ pipeline runs end-to-end without errors.
 import sys
 import os
 import time
-import threading
 import traceback
 
 # Setup path
@@ -68,7 +67,7 @@ def test_protocol():
     
     from common.protocol import (
         TelemetryPacket, MotionVector, CommandPacket,
-        PACKET_TYPE_TELEMETRY, HEADER_SIZE
+        HEADER_SIZE
     )
     from common.constants import VERSION
     
@@ -152,7 +151,7 @@ def test_config():
     """Test config loading with new GPS/IMU sections."""
     print("\n=== Phase 3: Config ===")
     
-    from common.config import Config, GPSConfig, IMUConfig
+    from common.config import Config
     
     def test_default_config():
         cfg = Config()
@@ -322,7 +321,6 @@ def test_simulation_to_server():
     
     import numpy as np
     from simulation.sim_node import SimNode, SimCameraConfig, SimTarget
-    from common.protocol import TelemetryPacket
     
     def test_sim_packet_creation():
         config = SimCameraConfig(
