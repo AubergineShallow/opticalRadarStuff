@@ -17,6 +17,7 @@ if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
 from common.constants import UDP_PORT, TARGET_FPS, PROTOCOL_VERSION
+from common.network import send_packet
 from common.protocol import TelemetryPacket, MotionVector as ProtocolMotionVector
 
 from .sim_utils import enu_to_azel, add_noise
@@ -194,20 +195,7 @@ class SimNode:
         
         self._sequence = (self._sequence + 1) & 0xFFFFFFFF
         
-        return self._send_packet(packet)
-    
-    def _send_packet(self, packet: TelemetryPacket) -> bool:
-        """Send packet to server."""
-        if not self._socket:
-            return False
-        
-        try:
-            data = packet.pack()
-            self._socket.sendto(data, (self.server_address, self.server_port))
-            return True
-        except Exception as e:
-            print(f"Send failed: {e}")
-            return False
+        return send_packet(self._socket, packet, self.server_address, self.server_port)
     
     def run(
         self,
