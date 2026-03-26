@@ -11,6 +11,14 @@ from typing import List, Optional, Dict
 from dataclasses import dataclass, field
 from pathlib import Path
 
+try:
+    from server.monitoring import log_warning
+except ImportError:
+    # Fallback to standard logging if project monitoring is not available
+    import logging
+    def log_warning(category, message, **kwargs):
+        logging.getLogger(category).warning(message)
+
 
 @dataclass
 class KeyMetadata:
@@ -156,14 +164,21 @@ class KeyManager:
             else:
                 lines.append(key_b64)
         
-        with open(path, 'w') as f:
-            f.write('\n'.join(lines) + '\n')
-        
-        # Set secure permissions (Unix only)
+        # Create file with secure permissions from the start
         try:
-            os.chmod(path, 0o600)
-        except Exception:
-            pass
+            fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+            with os.fdopen(fd, 'w') as f:
+                f.write('\n'.join(lines) + '\n')
+        except Exception as e:
+            # Fallback to standard open if os.open fails
+            with open(path, 'w') as f:
+                f.write('\n'.join(lines) + '\n')
+
+            # Set secure permissions (Unix only)
+            try:
+                os.chmod(path, 0o600)
+            except Exception as chmod_error:
+                log_warning("security", f"Failed to set secure permissions on {path}: {chmod_error}")
     
     @property
     def primary_key(self) -> Optional[bytes]:
