@@ -89,11 +89,15 @@ class WebSocketBroadcaster:
         if not self.clients:
             return
             
-        # Create list to avoid runtime error if set changes during iteration
-        for client in list(self.clients):
-            try:
-                await client.send(payload)
-            except websockets.exceptions.ConnectionClosed:
-                pass
-            except Exception as e:
-                print(f"WS Send Error: {e}")
+        # Use asyncio.gather to send to all clients concurrently
+        clients = list(self.clients)
+        tasks = [client.send(payload) for client in clients]
+
+        # return_exceptions=True ensures that one failed send doesn't stop others
+        results = await asyncio.gather(*tasks, return_exceptions=True)
+
+        # Log unexpected errors
+        for i, result in enumerate(results):
+            if isinstance(result, Exception):
+                if not isinstance(result, websockets.exceptions.ConnectionClosed):
+                    print(f"WS Send Error for client {i}: {result}")
