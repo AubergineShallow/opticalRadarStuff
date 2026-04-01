@@ -3,7 +3,6 @@ vision.py
 PURPOSE: Camera capture and motion detection for Raspberry Pi.
 """
 
-import time
 import numpy as np
 from typing import List, Tuple, Optional, Callable
 from dataclasses import dataclass
