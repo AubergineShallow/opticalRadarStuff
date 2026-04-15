@@ -35,6 +35,58 @@ def check(name, fn):
         traceback.print_exc()
 
 
+
+def test_geo():
+    print("\n=== Phase X: Geo Math ===")
+    from math_utils.geo import haversine_distance
+
+    def test_haversine():
+        # New York
+        lat1, lon1 = 40.7128, -74.0060
+        # London
+        lat2, lon2 = 51.5074, -0.1278
+
+        dist = haversine_distance(lat1, lon1, lat2, lon2)
+        assert 5500000 < dist < 5600000, f"Distance NY to London expected ~5570km, got {dist/1000}km"
+
+        # Identical points
+        dist_zero = haversine_distance(lat1, lon1, lat1, lon1)
+        assert dist_zero == 0.0, f"Distance to self expected 0.0, got {dist_zero}"
+
+        # Antipodal points
+        dist_antipodal = haversine_distance(0.0, 0.0, 0.0, 180.0)
+        # pi * R = 3.14159 * 6371000 = 20015086.7
+        assert 20000000 < dist_antipodal < 20030000, f"Distance antipodal expected ~20015km, got {dist_antipodal/1000}km"
+
+        return True
+
+    check("haversine_distance calculations", test_haversine)
+
+
+
+def test_quaternion():
+    print("\n=== Phase X: Quaternion Math ===")
+    from math_utils.quaternion import normalize
+
+    def test_normalize():
+        # Standard normalization
+        q = (1.0, 1.0, 1.0, 1.0)
+        norm_q = normalize(q)
+        assert abs(norm_q[0] - 0.5) < 1e-6, f"Expected 0.5 for w, got {norm_q[0]}"
+        assert abs(norm_q[1] - 0.5) < 1e-6, f"Expected 0.5 for x, got {norm_q[1]}"
+        assert abs(norm_q[2] - 0.5) < 1e-6, f"Expected 0.5 for y, got {norm_q[2]}"
+        assert abs(norm_q[3] - 0.5) < 1e-6, f"Expected 0.5 for z, got {norm_q[3]}"
+
+        # Zero magnitude edge case
+        zero_q = (0.0, 0.0, 0.0, 0.0)
+        norm_zero = normalize(zero_q)
+        assert norm_zero == (1.0, 0.0, 0.0, 0.0), f"Expected identity for zero mag, got {norm_zero}"
+
+        return True
+
+    check("quaternion normalize calculations", test_normalize)
+
+
 def test_imports():
     """Test that all modules import without errors."""
     print("\n=== Phase 1: Import Verification ===")
@@ -353,6 +405,8 @@ def main():
     print("OpticalRadar-Iter3 Full System Orchestration Test")
     print("=" * 60)
     
+    test_geo()
+    test_quaternion()
     test_imports()
     test_protocol()
     test_config()

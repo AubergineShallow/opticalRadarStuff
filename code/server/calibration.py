@@ -254,27 +254,35 @@ class Calibrator:
         correction: Optional[Tuple[float, float, float, float]] = None
     ) -> float:
         """Calculate mean residual with optional correction applied."""
+        if not observations:
+            return 0.0
+
         from math_utils.quaternion import rotate_vector
         
-        total = 0.0
-        count = 0
+        # Extract into Nx3 arrays
+        directions = np.array([obs.ray_direction for obs in observations])
+        targets = np.array([obs.target_position for obs in observations])
+        cameras = np.array([obs.camera_position for obs in observations])
         
-        for obs in observations:
-            direction = obs.ray_direction
+        if correction:
+            # Apply rotation
+            directions = np.array([rotate_vector(tuple(d), correction) for d in directions])
             
-            if correction:
-                direction = np.array(rotate_vector(tuple(direction), correction))
-            
-            # Distance from ray to target
-            v = obs.target_position - obs.camera_position
-            t = np.dot(v, direction)
-            closest = obs.camera_position + max(0, t) * direction
-            distance = np.linalg.norm(obs.target_position - closest)
-            
-            total += distance
-            count += 1
+        v = targets - cameras
+
+        # batched dot product
+        t = np.sum(v * directions, axis=1)
+
+        # Element-wise max with 0
+        t = np.maximum(0, t)
+
+        # closest = cameras + t[:, np.newaxis] * directions
+        closest = cameras + t.reshape(-1, 1) * directions
+
+        # distances
+        distances = np.linalg.norm(targets - closest, axis=1)
         
-        return total / max(1, count)
+        return float(np.mean(distances))
     
     def _compose_correction(self, axes, angles):
         """Compose a correction quaternion from per-axis rotation angles.
