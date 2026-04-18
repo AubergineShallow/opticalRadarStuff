@@ -8,7 +8,6 @@ import numpy as np
 from typing import List, Dict, Optional, Tuple
 from dataclasses import dataclass
 
-from .kalman_filter import KalmanFilter
 from .data_association import associate
 from .track_manager import TrackManager, Track, TrackState
 
