@@ -194,33 +194,6 @@ class KalmanFilter:
         
         return KalmanState(x=x_upd, P=P_upd), innovation
     
-    def gating_distance(
-        self,
-        state: KalmanState,
-        measurement: np.ndarray
-    ) -> float:
-        """
-        Calculate Mahalanobis distance for gating.
-        
-        Args:
-            state: Predicted state
-            measurement: Position measurement [x, y, z]
-        
-        Returns:
-            Mahalanobis distance
-        """
-        z = measurement.reshape(3)
-        y = z - self.H @ state.x
-        
-        S = self.H @ state.P @ self.H.T + self.R
-        
-        try:
-            S_inv = np.linalg.inv(S)
-            d2 = float(y.T @ S_inv @ y)
-            return np.sqrt(d2)
-        except np.linalg.LinAlgError:
-            return float('inf')
-    
     def predict_position(
         self,
         state: KalmanState,
