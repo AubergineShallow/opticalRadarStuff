@@ -24,6 +24,7 @@ import androidx.core.content.ContextCompat
 class MainActivity : ComponentActivity() {
 
     private var cameraProvider: ProcessCameraProvider? = null
+    private var sensorHelper: SensorHelper? = null
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -37,15 +38,27 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
 
         checkPermissions()
+        sensorHelper = SensorHelper(this)
 
         setContent {
             var serverIp by remember { mutableStateOf("192.168.1.100") }
             var nodeId by remember { mutableStateOf("5") }
             var isRunning by remember { mutableStateOf(false) }
 
-            // Simulating stats for now (in full app, service would broadcast these back to UI)
-            val tracksFound by remember { mutableStateOf(0) }
-            val packetsSent by remember { mutableStateOf(0) }
+            // Live Telemetry observed from the SensorHelper and Background Service
+            val lat by NodeState.latitude.collectAsState()
+            val lon by NodeState.longitude.collectAsState()
+            val alt by NodeState.altitude.collectAsState()
+
+            val deviceAz by NodeState.azimuth.collectAsState()
+            val devicePitch by NodeState.pitch.collectAsState()
+            val deviceRoll by NodeState.roll.collectAsState()
+
+            val targetAz by NodeState.lastTargetAzimuth.collectAsState()
+            val targetEl by NodeState.lastTargetElevation.collectAsState()
+
+            val activeTracks by NodeState.activeTracks.collectAsState()
+            val packetsSent by NodeState.packetsSent.collectAsState()
 
             MaterialTheme {
                 Surface(
@@ -55,41 +68,56 @@ class MainActivity : ComponentActivity() {
                     Column(modifier = Modifier.padding(16.dp)) {
                         Text("Optical Radar Node Setup", style = MaterialTheme.typography.headlineMedium)
 
-                        Spacer(modifier = Modifier.height(16.dp))
+                        Spacer(modifier = Modifier.height(8.dp))
 
                         // Camera Preview Window
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
-                                .height(300.dp)
+                                .height(250.dp)
                         ) {
                             CameraPreviewView()
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        Row(modifier = Modifier.fillMaxWidth()) {
-                            Text("Tracks: $tracksFound", modifier = Modifier.weight(1f))
-                            Text("UDP Sent: $packetsSent", modifier = Modifier.weight(1f))
+                        // Live Telemetry Dashboard
+                        Card(modifier = Modifier.fillMaxWidth()) {
+                            Column(modifier = Modifier.padding(8.dp)) {
+                                Text("GNSS", style = MaterialTheme.typography.titleMedium)
+                                Text(String.format("Lat: %.6f, Lon: %.6f", lat, lon))
+                                Text(String.format("Alt: %.1f m", alt))
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Text("IMU (Device Mount Angle)", style = MaterialTheme.typography.titleMedium)
+                                Text(String.format("Heading: %.1f°, Tilt: %.1f°, Roll: %.1f°", deviceAz, devicePitch, deviceRoll))
+
+                                Spacer(modifier = Modifier.height(8.dp))
+
+                                Text("Radar Tracking", style = MaterialTheme.typography.titleMedium)
+                                Text("Active Tracks: $activeTracks")
+                                Text(String.format("Last Target Vector -> Az: %.1f°, El: %.1f°", targetAz, targetEl))
+                                Text("UDP Packets Sent: $packetsSent")
+                            }
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        OutlinedTextField(
-                            value = serverIp,
-                            onValueChange = { serverIp = it },
-                            label = { Text("Server IP") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
-
-                        Spacer(modifier = Modifier.height(8.dp))
-
-                        OutlinedTextField(
-                            value = nodeId,
-                            onValueChange = { nodeId = it },
-                            label = { Text("Node ID") },
-                            modifier = Modifier.fillMaxWidth()
-                        )
+                        Row {
+                            OutlinedTextField(
+                                value = serverIp,
+                                onValueChange = { serverIp = it },
+                                label = { Text("Server IP") },
+                                modifier = Modifier.weight(1.5f).padding(end = 8.dp)
+                            )
+                            OutlinedTextField(
+                                value = nodeId,
+                                onValueChange = { nodeId = it },
+                                label = { Text("Node ID") },
+                                modifier = Modifier.weight(1f)
+                            )
+                        }
 
                         Spacer(modifier = Modifier.height(24.dp))
 
@@ -103,18 +131,17 @@ class MainActivity : ComponentActivity() {
                                     }
                                     ContextCompat.startForegroundService(this@MainActivity, intent)
                                     isRunning = true
+                                    sensorHelper?.start() // Start feeding UI sensors
                                 } else {
                                     stopService(Intent(this@MainActivity, RadarService::class.java))
                                     isRunning = false
+                                    sensorHelper?.stop()
                                 }
                             },
                             modifier = Modifier.fillMaxWidth()
                         ) {
                             Text(if (isRunning) "STOP RADAR" else "START RADAR")
                         }
-
-                        Spacer(modifier = Modifier.height(16.dp))
-                        Text("Note: After starting, you may turn off the screen. The node runs as a Foreground Service.")
                     }
                 }
             }
@@ -164,7 +191,8 @@ class MainActivity : ComponentActivity() {
     private fun checkPermissions() {
         val requiredPermissions = arrayOf(
             Manifest.permission.CAMERA,
-            Manifest.permission.ACCESS_FINE_LOCATION
+            Manifest.permission.ACCESS_FINE_LOCATION,
+            Manifest.permission.ACCESS_COARSE_LOCATION
         )
         val missingPermissions = requiredPermissions.filter {
             ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
@@ -172,5 +200,10 @@ class MainActivity : ComponentActivity() {
         if (missingPermissions.isNotEmpty()) {
             requestPermissionLauncher.launch(missingPermissions.toTypedArray())
         }
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        sensorHelper?.stop()
     }
 }

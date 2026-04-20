@@ -6,7 +6,6 @@ import androidx.camera.core.ImageProxy
 import com.google.mlkit.vision.common.InputImage
 import com.google.mlkit.vision.objects.ObjectDetection
 import com.google.mlkit.vision.objects.defaults.ObjectDetectorOptions
-import kotlin.math.atan2
 
 class VisionAnalyzer(
     private val horizontalFovDegrees: Float = 60.0f,
@@ -14,11 +13,10 @@ class VisionAnalyzer(
     private val onTracksUpdated: (List<TrackedObject>) -> Unit
 ) : ImageAnalysis.Analyzer {
 
-    // Configure ML Kit to track multiple objects across frames automatically
     private val options = ObjectDetectorOptions.Builder()
         .setDetectorMode(ObjectDetectorOptions.STREAM_MODE)
         .enableMultipleObjects()
-        .enableClassification() // Helps weed out noise
+        .enableClassification()
         .build()
 
     private val objectDetector = ObjectDetection.getClient(options)
@@ -37,32 +35,29 @@ class VisionAnalyzer(
                     val imgHeight = imageProxy.height.toFloat()
 
                     for (obj in detectedObjects) {
-                        // We only care about objects ML Kit is confident enough to assign a tracking ID
                         val trackId = obj.trackingId ?: continue
 
-                        // Get the center of the bounding box
                         val centerX = obj.boundingBox.exactCenterX()
                         val centerY = obj.boundingBox.exactCenterY()
 
-                        // Convert pixels to vectors (Azimuth / Elevation)
-                        // This mirrors the math in python's `vision.py`
                         val nx = (centerX / imgWidth) - 0.5f
                         val ny = (centerY / imgHeight) - 0.5f
 
-                        // Simple rectilinear projection mapping
                         val azimuth = nx * horizontalFovDegrees
-                        val elevation = -ny * verticalFovDegrees // Invert Y so up is positive
+                        val elevation = -ny * verticalFovDegrees
 
                         tracks.add(TrackedObject(trackId, azimuth, elevation))
+
+                        // Push to dashboard state
+                        NodeState.lastTargetAzimuth.value = azimuth
+                        NodeState.lastTargetElevation.value = elevation
                     }
+
+                    NodeState.activeTracks.value = tracks.size
                     onTracksUpdated(tracks)
                 }
-                .addOnFailureListener { e ->
-                    e.printStackTrace()
-                }
-                .addOnCompleteListener {
-                    imageProxy.close()
-                }
+                .addOnFailureListener { e -> e.printStackTrace() }
+                .addOnCompleteListener { imageProxy.close() }
         } else {
             imageProxy.close()
         }

@@ -8,21 +8,12 @@ import android.content.Intent
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import kotlinx.coroutines.*
-import kotlin.math.asin
-import kotlin.math.atan2
 
 class RadarService : Service() {
     private val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
     private var udpClient: UdpClient? = null
 
-    // In a full implementation, these would be polled from Android's LocationManager and SensorManager
-    private var currentLat = 0.0f
-    private var currentLon = 0.0f
-    private var currentAlt = 0.0f
-    private var roll = 0.0f
-    private var pitch = 0.0f
-    private var yaw = 0.0f
-
+    // Bind to the shared NodeState singleton to grab GPS/IMU parameters
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         val serverIp = intent?.getStringExtra("SERVER_IP") ?: "127.0.0.1"
         val serverPort = intent?.getIntExtra("SERVER_PORT", 5005) ?: 5005
@@ -35,12 +26,17 @@ class RadarService : Service() {
 
         // Send Boot Announce
         scope.launch {
-            udpClient?.sendAnnounce(nodeId, currentLat, currentLon, currentAlt, roll, pitch, yaw)
-        }
+            // Grab the active state variables
+            val lat = NodeState.latitude.value.toFloat()
+            val lon = NodeState.longitude.value.toFloat()
+            val alt = NodeState.altitude.value.toFloat()
+            val roll = NodeState.roll.value
+            val pitch = NodeState.pitch.value
+            val yaw = NodeState.azimuth.value // Heading
 
-        // Note: In reality, CameraX lifecycle is heavily tied to Activities or ProcessCameraProvider.
-        // Starting a camera directly inside a Service without a LifecycleOwner requires a custom LifecycleRegistry.
-        // We abstract the VisionAnalyzer hook here.
+            udpClient?.sendAnnounce(nodeId, lat, lon, alt, roll, pitch, yaw)
+            NodeState.packetsSent.value += 1
+        }
 
         return START_STICKY
     }
@@ -51,6 +47,7 @@ class RadarService : Service() {
             for (track in tracks) {
                 // Send the UDP packet over the network
                 udpClient?.sendUpdate(nodeId, track.trackId, track.azimuth, track.elevation)
+                NodeState.packetsSent.value += 1
             }
         }
     }
