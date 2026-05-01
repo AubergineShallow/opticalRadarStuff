@@ -110,12 +110,13 @@ def greedy_assignment(
     used_tracks = set()
     used_dets = set()
     
-    # Get all valid (track, det, cost) tuples
-    candidates = []
-    for i in range(n_tracks):
-        for j in range(n_dets):
-            if cost_matrix[i, j] <= max_distance:
-                candidates.append((cost_matrix[i, j], i, j))
+    # Get all valid (track, det, cost) tuples using NumPy vectorization
+    valid_indices = np.where(cost_matrix <= max_distance)
+    candidates = list(zip(
+        cost_matrix[valid_indices].tolist(),
+        valid_indices[0].tolist(),
+        valid_indices[1].tolist()
+    ))
     
     # Sort by cost (ascending)
     candidates.sort()
