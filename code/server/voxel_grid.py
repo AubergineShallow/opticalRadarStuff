@@ -4,7 +4,7 @@ PURPOSE: 3D grid for accumulating ray intersections.
 """
 
 import numpy as np
-from typing import List, Tuple, Optional
+from typing import List, Tuple, Optional, Any
 from dataclasses import dataclass
 
 # Import native acceleration module (with Python fallback)
@@ -177,7 +177,7 @@ class VoxelGrid:
     
     def add_rays_batch(
         self,
-        rays: List[Tuple[np.ndarray, np.ndarray, float]],  # (origin, direction, intensity)
+        rays: List[Any],  # List of Ray objects
         max_distance: float = 150.0,
         step_size: float = 0.5
     ) -> int:
@@ -187,7 +187,7 @@ class VoxelGrid:
         Uses native C++ batch processing when available for maximum performance.
         
         Args:
-            rays: List of (origin, direction, intensity) tuples
+            rays: List of Ray objects containing origin, direction, and intensity
             max_distance: Maximum ray distance
         
         Returns:
@@ -198,9 +198,9 @@ class VoxelGrid:
         
         # Use native batch processing if available
         if _NATIVE_MODULE is not None:
-            origins = np.array([r[0] for r in rays], dtype=np.float32)
-            directions = np.array([r[1] for r in rays], dtype=np.float32)
-            intensities = np.array([r[2] for r in rays], dtype=np.float32)
+            origins = np.array([r.origin for r in rays], dtype=np.float32)
+            directions = np.array([r.direction for r in rays], dtype=np.float32)
+            intensities = np.array([r.intensity for r in rays], dtype=np.float32)
             
             return _NATIVE_MODULE.add_rays_batch(
                 self.grid,
@@ -215,8 +215,8 @@ class VoxelGrid:
         
         # Python fallback
         total = 0
-        for origin, direction, intensity in rays:
-            total += self.add_ray(origin, direction, intensity, max_distance, step_size)
+        for r in rays:
+            total += self.add_ray(r.origin, r.direction, r.intensity, max_distance, step_size)
         return total
     
     def get_hot_voxels(

@@ -421,12 +421,7 @@ class OpticalRadarServer:
         )
         
         # Add all rays to voxel grid
-        for ray in rays:
-            self.voxel_grid.add_ray(
-                ray.origin,
-                ray.direction,
-                ray.intensity
-            )
+        self.voxel_grid.add_rays_batch(rays)
         
         # ===== CALIBRATION FIX =====
         # Use CONFIRMED TRACKS for calibration, not raw hot voxels.
