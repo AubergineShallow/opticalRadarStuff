@@ -16,6 +16,7 @@ if _parent not in sys.path:
 
 from common.config import load as load_config
 from common.constants import UDP_PORT, TARGET_FPS, PROTOCOL_VERSION
+from common.network import send_packet
 from common.protocol import TelemetryPacket, MotionVector as ProtocolMotionVector, AnnouncePacket
 
 from .vision import VisionSystem, VisionConfig
@@ -235,20 +236,7 @@ class RPiNode:
         self._sequence = (self._sequence + 1) & 0xFFFFFFFF
         
         # 5. Send packet
-        return self._send_packet(packet)
-    
-    def _send_packet(self, packet: TelemetryPacket) -> bool:
-        """Send packet to server."""
-        if not self._socket:
-            return False
-        
-        try:
-            data = packet.pack()
-            self._socket.sendto(data, (self.server_address, self.server_port))
-            return True
-        except Exception as e:
-            print(f"Send failed: {e}")
-            return False
+        return send_packet(self._socket, packet, self.server_address, self.server_port)
     
     def run(self, target_fps: float = TARGET_FPS) -> None:
         """

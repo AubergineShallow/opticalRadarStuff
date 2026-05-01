@@ -10,6 +10,7 @@ from .protocol import (
     HEADER_SIZE,
     SIGNATURE_SIZE
 )
+from .network import send_packet
 
 __all__ = [
     # Constants
@@ -24,4 +25,7 @@ __all__ = [
     # Protocol
     'MotionVector', 'TelemetryPacket', 'CommandPacket',
     'create_telemetry_packet', 'HEADER_SIZE', 'SIGNATURE_SIZE',
+
+    # Network
+    'send_packet',
 ]
