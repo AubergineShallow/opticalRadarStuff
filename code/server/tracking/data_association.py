@@ -8,6 +8,8 @@ from typing import List, Tuple, Optional
 from scipy.optimize import linear_sum_assignment
 
 
+from scipy.spatial.distance import cdist
+
 def compute_cost_matrix(
     predicted_positions: List[np.ndarray],
     measurements: List[np.ndarray],
@@ -31,12 +33,10 @@ def compute_cost_matrix(
         return np.zeros((n_tracks, n_dets))
     
     cost = np.full((n_tracks, n_dets), max_distance * 10, dtype=np.float64)
+    dist_matrix = cdist(predicted_positions, measurements)
     
-    for i, track_pos in enumerate(predicted_positions):
-        for j, det_pos in enumerate(measurements):
-            dist = np.linalg.norm(track_pos - det_pos)
-            if dist <= max_distance:
-                cost[i, j] = dist
+    mask = dist_matrix <= max_distance
+    cost[mask] = dist_matrix[mask]
     
     return cost
 
