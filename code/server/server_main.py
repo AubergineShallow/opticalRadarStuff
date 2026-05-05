@@ -10,7 +10,7 @@ import time
 import signal
 import sys
 import os
-from typing import Optional, List
+from typing import Optional, List, Tuple
 import numpy as np
 
 # Add parent to path for absolute imports
@@ -314,7 +314,8 @@ class OpticalRadarServer:
                 "last_seen": track.last_update,
                 "hit_count": track.hits,
                 "confidence": track.confidence,
-                "predicted_next": [0,0,0]
+                "predicted_next": [0,0,0],
+                "physical_size": float(getattr(track, 'physical_size', 0.0))
             })
         self.ws_server.broadcast("TRACK_UPDATE", tracks)
         
@@ -440,29 +441,48 @@ class OpticalRadarServer:
             
             for ray in rays:
                 # Find the confirmed track that this ray points toward
-                best_position = self._find_best_matching_voxel(
+                match_result = self._find_best_matching_voxel(
                     ray.origin, ray.direction, track_positions
                 )
                 
-                if best_position is not None:
+                if match_result is not None:
+                    best_position, track_idx = match_result
+
                     self.calibrator.add_observation(
                         packet.camera_id,
                         ray.direction,
                         best_position,
                         ray.origin
                     )
+
+                    # Estimate physical size and update track
+                    if hasattr(ray, 'angular_size') and ray.angular_size > 0:
+                        dist = np.linalg.norm(best_position - ray.origin)
+                        # Physical Size = 2 * D * tan(theta / 2)
+                        estimated_size = 2.0 * dist * np.tan(np.radians(ray.angular_size) / 2.0)
+
+                        track = confirmed_tracks[track_idx]
+                        self.tracker._track_manager.update_track(
+                            track.track_id,
+                            best_position,
+                            0.0, # no time step for pure size update
+                            physical_size=estimated_size
+                        )
     
     def _find_best_matching_voxel(
         self,
         ray_origin: np.ndarray,
         ray_direction: np.ndarray,
         candidate_positions: np.ndarray
-    ) -> Optional[np.ndarray]:
+    ) -> Optional[Tuple[np.ndarray, int]]:
         """
         Find the position that best matches a ray's direction.
         
         Uses ray-point distance to find the closest position to the ray.
         Works for both hot voxels and confirmed track positions.
+
+        Returns:
+            Tuple of (closest_position, index) or None
         """
         if len(candidate_positions) == 0:
             return None
@@ -487,7 +507,7 @@ class OpticalRadarServer:
         # Return the closest position within a reasonable threshold (e.g., 10m)
         min_idx = np.argmin(distances)
         if distances[min_idx] < 10.0:
-            return candidate_positions[min_idx]
+            return (candidate_positions[min_idx], min_idx)
         
         return None
     

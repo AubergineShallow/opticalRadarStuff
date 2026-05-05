@@ -28,33 +28,39 @@ SIGNATURE_SIZE = 32
 class MotionVector:
     """
     Single detection from camera.
-    Packed size: 6 bytes (uint16 + int16 + uint8 + uint8)
+    Packed size: 8 bytes (uint16 + int16 + uint8 + uint8 + uint16)
     """
     azimuth: float      # [0, 360) degrees
     elevation: float    # [-90, 90] degrees
     intensity: int      # [0, 255]
     class_id: int       # [0, 255]
+    angular_size: float = 0.0 # [0, 180] degrees (default 0.0)
     
     def pack(self) -> bytes:
-        """Pack to 6 bytes."""
+        """Pack to 8 bytes."""
         # Scale azimuth [0, 360) -> [0, 65535]
         az_raw = int((self.azimuth / 360.0) * 65535) & 0xFFFF
         # Scale elevation [-90, 90] -> [-32768, 32767]
         el_raw = int((self.elevation / 90.0) * 32767)
         el_raw = max(-32768, min(32767, el_raw))
         
-        return struct.pack('>HhBB', az_raw, el_raw, 
-                          self.intensity & 0xFF, self.class_id & 0xFF)
+        # Scale angular size [0, 180] -> [0, 65535]
+        size_raw = int((self.angular_size / 180.0) * 65535)
+        size_raw = max(0, min(65535, size_raw))
+
+        return struct.pack('>HhBBH', az_raw, el_raw,
+                          self.intensity & 0xFF, self.class_id & 0xFF, size_raw)
     
     @classmethod
     def unpack(cls, data: bytes) -> 'MotionVector':
-        """Unpack from 6 bytes."""
-        az_raw, el_raw, intensity, class_id = struct.unpack('>HhBB', data)
+        """Unpack from 8 bytes."""
+        az_raw, el_raw, intensity, class_id, size_raw = struct.unpack('>HhBBH', data)
         
         azimuth = (az_raw / 65535.0) * 360.0
         elevation = (el_raw / 32767.0) * 90.0
+        angular_size = (size_raw / 65535.0) * 180.0
         
-        return cls(azimuth, elevation, intensity, class_id)
+        return cls(azimuth, elevation, intensity, class_id, angular_size)
 
 
 @dataclass

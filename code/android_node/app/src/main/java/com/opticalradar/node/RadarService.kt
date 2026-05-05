@@ -50,7 +50,7 @@ class RadarService : Service() {
         scope.launch {
             for (track in tracks) {
                 // Send the UDP packet over the network
-                udpClient?.sendUpdate(nodeId, track.trackId, track.azimuth, track.elevation)
+                udpClient?.sendUpdate(nodeId, track.trackId, track.azimuth, track.elevation, track.angularSize)
             }
         }
     }

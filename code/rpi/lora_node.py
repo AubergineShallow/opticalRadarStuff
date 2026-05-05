@@ -68,7 +68,8 @@ class LoRaNode:
                                 node_id=self.node_id,
                                 track_id=track.track_id,
                                 azimuth=track.az,
-                                elevation=track.el
+                                elevation=track.el,
+                                angular_size=getattr(track, 'angular_size', 0.0) # default to 0 if not tracked
                             )
                             self.transmit_lora(update_pkt.pack())
                             # Brief pause between track packets if required by hardware modem

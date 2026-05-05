@@ -53,7 +53,13 @@ class VisionAnalyzer(
                         val azimuth = nx * horizontalFovDegrees
                         val elevation = -ny * verticalFovDegrees // Invert Y so up is positive
 
-                        tracks.add(TrackedObject(trackId, azimuth, elevation))
+                        // Calculate angular size based on bounding box
+                        val boxWidth = obj.boundingBox.width().toFloat()
+                        val boxHeight = obj.boundingBox.height().toFloat()
+                        val maxDim = maxOf(boxWidth, boxHeight)
+                        val angularSize = (maxDim / imgWidth) * horizontalFovDegrees
+
+                        tracks.add(TrackedObject(trackId, azimuth, elevation, angularSize))
                     }
                     onTracksUpdated(tracks)
                 }
@@ -72,5 +78,6 @@ class VisionAnalyzer(
 data class TrackedObject(
     val trackId: Int,
     val azimuth: Float,
-    val elevation: Float
+    val elevation: Float,
+    val angularSize: Float
 )

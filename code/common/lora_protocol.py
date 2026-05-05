@@ -42,13 +42,14 @@ class LoraAnnouncePacket:
 class LoraUpdatePacket:
     """
     Sent periodically (e.g. every 5 seconds) to update track positions.
-    Size: 6 bytes
-    [uint8 type][uint8 node_id][uint8 track_id][uint16 az][int8 el]
+    Size: 7 bytes
+    [uint8 type][uint8 node_id][uint8 track_id][uint16 az][int8 el][uint8 size]
     """
     node_id: int
     track_id: int
     azimuth: float   # [0, 360)
     elevation: float # [-90, 90]
+    angular_size: float = 0.0 # [0, 180]
 
     def pack(self) -> bytes:
         # Azimuth: 0-360 mapped to uint16 (0-65535)
@@ -58,14 +59,19 @@ class LoraUpdatePacket:
         # Clamp to int8 range
         el_comp = max(-128, min(127, el_comp))
 
-        # Format: unsigned char, unsigned char, unsigned char, unsigned short, signed char
-        # 'B B B H b' -> 1+1+1+2+1 = 6 bytes
-        return struct.pack('<BBBHb',
+        # Angular size: 0-180 mapped to uint8 (0-255)
+        size_comp = int((self.angular_size / 180.0) * 255)
+        size_comp = max(0, min(255, size_comp))
+
+        # Format: unsigned char, unsigned char, unsigned char, unsigned short, signed char, unsigned char
+        # 'B B B H b B' -> 1+1+1+2+1+1 = 7 bytes
+        return struct.pack('<BBBHbB',
                            MSG_TYPE_UPDATE,
                            self.node_id,
                            self.track_id,
                            az_comp,
-                           el_comp)
+                           el_comp,
+                           size_comp)
 
 def unpack_lora(data: bytes) -> tuple:
     """Helper to decode incoming LoRaWAN bytes."""
@@ -80,14 +86,16 @@ def unpack_lora(data: bytes) -> tuple:
             pitch_deg=unpacked[6]/100.0,
             yaw_deg=unpacked[7]/100.0
         )
-    elif msg_type == MSG_TYPE_UPDATE and len(data) == 6:
-        unpacked = struct.unpack('<BBBHb', data)
+    elif msg_type == MSG_TYPE_UPDATE and len(data) == 7:
+        unpacked = struct.unpack('<BBBHbB', data)
         az = (unpacked[3] / 65535.0) * 360.0
         el = float(unpacked[4])
+        size = (unpacked[5] / 255.0) * 180.0
         return LoraUpdatePacket(
             node_id=unpacked[1],
             track_id=unpacked[2],
             azimuth=az,
-            elevation=el
+            elevation=el,
+            angular_size=size
         )
     return None

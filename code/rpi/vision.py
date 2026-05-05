@@ -162,6 +162,14 @@ class VisionSystem:
             cx = int(M["m10"] / M["m00"])
             cy = int(M["m01"] / M["m00"])
             
+            # Get bounding box for angular size calculation
+            x, y, w, h = cv2.boundingRect(contour)
+
+            # Use the max of width/height for a conservative "cone" size
+            max_dim = max(w, h)
+            # Rough angular size based on horizontal FOV
+            angular_size = (max_dim / self.config.resolution[0]) * self.config.horizontal_fov
+
             # Convert pixel to angles
             azimuth, elevation = self._pixel_to_angles(cx, cy)
             
@@ -171,7 +179,8 @@ class VisionSystem:
             vectors.append(MotionVector(
                 azimuth=azimuth,
                 elevation=elevation,
-                intensity=intensity
+                intensity=intensity,
+                angular_size=angular_size
             ))
         
         return vectors
@@ -184,7 +193,8 @@ class VisionSystem:
                 MotionVector(
                     azimuth=np.random.uniform(0, 360),
                     elevation=np.random.uniform(-45, 45),
-                    intensity=np.random.randint(50, 200)
+                    intensity=np.random.randint(50, 200),
+                    angular_size=np.random.uniform(1.0, 10.0)
                 )
             ]
         return []

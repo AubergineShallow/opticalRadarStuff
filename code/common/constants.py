@@ -23,7 +23,7 @@ MAX_VOXEL_UPDATE_MS = 10
 MAX_TRACKING_MS = 5
 
 # Motion Vector Constants
-MOTION_VECTOR_SIZE = 6  # bytes (uint16 + int16 + uint8 + uint8)
+MOTION_VECTOR_SIZE = 8  # bytes (uint16 + int16 + uint8 + uint8 + uint16)
 
 # Track States
 TRACK_STATE_TENTATIVE = 0

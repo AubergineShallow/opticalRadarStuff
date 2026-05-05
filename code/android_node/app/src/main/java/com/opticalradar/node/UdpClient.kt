@@ -34,10 +34,10 @@ class UdpClient(private val serverIp: String, private val serverPort: Int) {
 
     /**
      * Sends the Update packet. Matches the Python `LoraUpdatePacket` C-struct.
-     * [uint8 type][uint8 node_id][uint8 track_id][uint16 az][int8 el]
+     * [uint8 type][uint8 node_id][uint8 track_id][uint16 az][int8 el][uint8 size]
      */
-    fun sendUpdate(nodeId: Int, trackId: Int, azimuth: Float, elevation: Float) {
-        val buffer = ByteBuffer.allocate(6).order(ByteOrder.LITTLE_ENDIAN)
+    fun sendUpdate(nodeId: Int, trackId: Int, azimuth: Float, elevation: Float, angularSize: Float) {
+        val buffer = ByteBuffer.allocate(7).order(ByteOrder.LITTLE_ENDIAN)
         buffer.put(0x02.toByte()) // MSG_TYPE_UPDATE
         buffer.put(nodeId.toByte())
         buffer.put(trackId.toByte())
@@ -48,6 +48,10 @@ class UdpClient(private val serverIp: String, private val serverPort: Int) {
         // Clamp elevation between -128 and 127
         val elComp = elevation.toInt().coerceIn(-128, 127)
         buffer.put(elComp.toByte())
+
+        // Scale angular size [0, 180] -> [0, 255]
+        val sizeComp = ((angularSize / 180.0) * 255).toInt().coerceIn(0, 255)
+        buffer.put(sizeComp.toByte())
 
         val packet = DatagramPacket(buffer.array(), buffer.capacity(), address, serverPort)
         socket.send(packet)
