@@ -10,7 +10,7 @@ import time
 import signal
 import sys
 import os
-from typing import Optional, List, Tuple
+from typing import Optional, List, Tuple, Dict
 import numpy as np
 
 # Add parent to path for absolute imports
@@ -24,577 +24,377 @@ from common.protocol import TelemetryPacket, PACKET_TYPE_TELEMETRY, PACKET_TYPE_
 # Use try/except for both module and direct execution support
 try:
     from .udp_server import UDPServer
-    from .voxel_grid import VoxelGrid, VoxelGridConfig
-    from .ray_builder import RayBuilder
+    from .cluster_manager import ClusterManager, Cluster
     from .calibration import Calibrator
     from .visualizer import Visualizer
-    from .tracking import Tracker, Detection
-    from .monitoring import (
-        get_logger, configure_logger, get_metrics, 
-        NodeHealthMonitor, Timer,
-        METRIC_PACKETS_PROCESSED, METRIC_ACTIVE_TRACKS, METRIC_VOXEL_UPDATE_TIME
-    )
-    from .security import Authenticator
-    from .validation import CalibrationValidator, GroundTruthValidator
     from .websocket_server import WebSocketBroadcaster
+    from .monitoring.node_health import NodeHealthMonitor
+    from .monitoring.logger import StructuredLogger
+    from .validation.ground_truth import GroundTruthValidator
+    from .security.authenticator import Authenticator
 except ImportError:
-    # Direct execution fallback
     from server.udp_server import UDPServer
-    from server.voxel_grid import VoxelGrid, VoxelGridConfig
-    from server.ray_builder import RayBuilder
+    from server.cluster_manager import ClusterManager, Cluster
     from server.calibration import Calibrator
     from server.visualizer import Visualizer
-    from server.tracking import Tracker, Detection
-    from server.monitoring import (
-        get_logger, configure_logger, get_metrics, 
-        NodeHealthMonitor, Timer,
-        METRIC_PACKETS_PROCESSED, METRIC_ACTIVE_TRACKS, METRIC_VOXEL_UPDATE_TIME
-    )
-    from server.security import Authenticator
-    from server.validation import CalibrationValidator, GroundTruthValidator
     from server.websocket_server import WebSocketBroadcaster
-
+    from server.monitoring.node_health import NodeHealthMonitor
+    from server.monitoring.logger import StructuredLogger
+    from server.validation.ground_truth import GroundTruthValidator
+    from server.security.authenticator import Authenticator
 
 class OpticalRadarServer:
-    """
-    Main server orchestrating all subsystems.
+    """Main orchestrator for the server backend."""
     
-    Components:
-        - UDP Server: Receive telemetry
-        - Ray Builder: Convert packets to rays
-        - Voxel Grid: Accumulate ray intersections
-        - Tracker: Track persistent objects
-        - Calibrator: Self-calibration
-        - Monitoring: Health, metrics, logging
-        - Security: Authentication
-        - Validation: Quality assurance
-        - Visualizer: 3D display
-    """
-    
-    def __init__(
-        self,
-        config_path: Optional[str] = None,
-        reference_lat: float = 0.0,
-        reference_lon: float = 0.0,
-        reference_alt: float = 0.0,
-        headless: bool = False
-    ):
-        """
-        Initialize server.
-        
-        Args:
-            config_path: Path to config.yaml
-            reference_lat: Reference latitude for ENU
-            reference_lon: Reference longitude for ENU
-            reference_alt: Reference altitude for ENU (meters above sea level)
-            headless: Run without visualization
-        """
-        # Load configuration
-        self.config = load_config(config_path)
-        self.headless = headless or self.config.system.headless
-        
-        # Configure logging
-        self.logger = configure_logger(
-            log_file=self.config.monitoring.log_file,
-            log_level=self.config.monitoring.log_level
-        )
-        
+    def __init__(self, config_path: str = 'config.yaml', headless: bool = False):
+        self.logger = StructuredLogger()
         self.logger.info("system", "Initializing OpticalRadar server")
         
-        # Initialize metrics
-        self.metrics = get_metrics()
-        
-        # Security (optional)
-        self.authenticator = None
-        if self.config.security.enabled:
-            try:
-                self.authenticator = Authenticator(
-                    key_file=self.config.security.key_file,
-                    max_timestamp_drift_sec=self.config.security.auth_timeout_sec
-                )
-                self.logger.info("security", "Authentication enabled")
-            except Exception as e:
-                self.logger.warning("security", f"Auth disabled: {e}")
-        
-        # UDP Server
-        self.udp_server = UDPServer(
-            port=self.config.network.udp_port,
-            max_packet_size=self.config.network.max_packet_size,
-            authenticator=self.authenticator
-        )
-        
-        # Ray Builder
-        self.ray_builder = RayBuilder(
-            reference_lat=reference_lat,
-            reference_lon=reference_lon,
-            reference_alt=reference_alt
-        )
-        
-        # Voxel Grid
-        grid_config = VoxelGridConfig(
-            width_m=self.config.grid.width_m,
-            depth_m=self.config.grid.depth_m,
-            height_m=self.config.grid.height_m,
-            resolution_m=self.config.grid.resolution_m,
-            decay_rate=self.config.grid.decay_rate,
-            hot_threshold=self.config.grid.hot_threshold
-        )
-        self.voxel_grid = VoxelGrid(grid_config)
-        
-        # Tracker
-        self.tracker = Tracker(
-            distance_threshold=self.config.tracking.distance_threshold_m,
-            min_hits_to_confirm=self.config.tracking.min_hits_to_confirm,
-            max_misses_to_delete=self.config.tracking.max_misses_to_delete,
-            max_tracks=self.config.tracking.max_tracks,
-            q_process_noise=self.config.tracking.q_process_noise,
-            r_measurement_noise=self.config.tracking.r_measurement_noise
-        )
-        
-        # Validation
-        self.calibration_validator = CalibrationValidator()
-        self.ground_truth = GroundTruthValidator()
-        
-        # Calibrator
-        self.calibrator = Calibrator(validator=self.calibration_validator)
-        
-        # Health Monitor
-        self.node_health = NodeHealthMonitor(
-            offline_timeout_sec=30.0,
-            alert_callback=self._on_health_change
-        )
+        self.config = load_config(config_path)
+        self.headless = headless
+        self.running = False
 
-        # WebSocket Server
-        try:
-            self.ws_server = WebSocketBroadcaster(port=5000)
-            self.logger.info("system", "WebSocket server initialized")
-        except Exception as e:
-            self.logger.error("system", f"Failed to init WebSocket: {e}")
-            self.ws_server = None
+        # Determine if security should be enabled
+        sec_env = os.environ.get('OR_SECURITY_ENABLED', '').lower()
+        sec_obj = getattr(self.config, 'security', None)
+        sec_config = getattr(sec_obj, 'enabled', True) if sec_obj else True
+        # Disable if environment explicitly says false, otherwise follow config
+        security_enabled = False if sec_env in ('0', 'false') else sec_config
+
+        # 1. Security Initialization
+        self.authenticator = None
+        if security_enabled:
+            try:
+                self.authenticator = Authenticator()
+                self.logger.info("security", "Authentication system enabled")
+            except Exception as e:
+                self.logger.error("security", f"Failed to initialize authenticator: {e}")
+                self.logger.error("security", "Security is enabled but authenticator failed. Halting.")
+                raise RuntimeError("Authentication initialization failed")
+        else:
+            self.logger.warning("security", "Authentication system disabled via configuration")
+
+        # 2. Network & Comms
+        self.udp_server = UDPServer(self.config)
+
+        server_config = getattr(self.config, 'server', None)
+        ws_port = getattr(server_config, 'ws_port', 8080) if server_config else 8080
+        self.ws_server = WebSocketBroadcaster(port=ws_port)
+
+        # Register command handlers for multi-cluster support
+        if hasattr(self.ws_server, 'register_command_handler'):
+            self.ws_server.register_command_handler('CREATE_CLUSTER', self._handle_create_cluster)
+            self.ws_server.register_command_handler('ASSIGN_NODE', self._handle_assign_node)
+
+        # 3. Processing Core (Replaced Monolithic tracker with ClusterManager)
+        self.cluster_manager = ClusterManager(self.config)
+        self.calibrator = Calibrator(self.config)
+
+        # Legacy mappings for system_test compatibility
+        self._default_cluster = self.cluster_manager.clusters['DEFAULT']
+        self.voxel_grid = self._default_cluster.voxel_grid
+        self.tracker = self._default_cluster.tracker
+        self.ray_builder = self._default_cluster.ray_builder
+
+        # 4. Monitoring & Validation
+        self.node_health = NodeHealthMonitor()
+        self.health_monitor = self.node_health # Keep old reference just in case
+        self.ground_truth = GroundTruthValidator()
+        self.gt_evaluator = self.ground_truth
         
-        # Visualizer
+        # 5. Visualization
         self.visualizer = None
         if not self.headless:
             self.visualizer = Visualizer()
+
+        self._setup_signal_handlers()
         
-        # State
-        self._running = False
+        # Performance tracking
         self._frame_count = 0
+        self.frame_count = 0
+        self.last_fps_time = time.time()
         self._start_time = time.time()
-        self._last_frame_time = 0.0
+        self._last_frame_time = time.time()
         self._fps = 0.0
-    
-    def _on_health_change(self, node_id: str, old_status, new_status) -> None:
-        """Handle node health status change."""
-        self.logger.warning(
-            "health", 
-            f"Node {node_id} status changed: {old_status.value} -> {new_status.value}"
-        )
-    
-    def start(self) -> None:
-        """Start the server."""
-        self.logger.info("system", "Starting server")
-        
-        # Start UDP server
+        self.current_fps = 0.0
+
+    def _handle_create_cluster(self, client_id: str, payload: dict):
+        """WebSocket handler for CREATE_CLUSTER command"""
+        cluster_id = payload.get('cluster_id')
+        if cluster_id:
+            self.cluster_manager.create_cluster(cluster_id)
+            self.logger.info("cluster", f"Created new cluster: {cluster_id}")
+            self._broadcast_system_status()
+
+    def _handle_assign_node(self, client_id: str, payload: dict):
+        """WebSocket handler for ASSIGN_NODE command"""
+        node_id = payload.get('node_id')
+        cluster_id = payload.get('cluster_id')
+        if node_id and cluster_id:
+            success = self.cluster_manager.assign_node(node_id, cluster_id)
+            if success:
+                self.logger.info("cluster", f"Assigned node {node_id} to cluster {cluster_id}")
+                self._broadcast_system_status()
+            else:
+                self.logger.warning("cluster", f"Failed to assign node {node_id} to cluster {cluster_id}")
+
+    def _setup_signal_handlers(self):
+        signal.signal(signal.SIGINT, self._handle_shutdown)
+        signal.signal(signal.SIGTERM, self._handle_shutdown)
+
+    def _handle_shutdown(self, signum, frame):
+        self.logger.info("system", f"Received signal {signum}, initiating shutdown...")
+        self.stop()
+
+    def start(self):
+        """Start all server components."""
+        self.running = True
         self.udp_server.start()
+        self.ws_server.start()
         
-        # Start WebSocket server
-        if self.ws_server:
-            self.ws_server.start()
+        self.logger.info("system", "OpticalRadar server started successfully")
         
-        # Setup visualizer
-        if self.visualizer:
-            self.visualizer.setup()
-        
-        self._running = True
-        
-        # Setup signal handlers
-        signal.signal(signal.SIGINT, self._signal_handler)
-        signal.signal(signal.SIGTERM, self._signal_handler)
-        
-        self.logger.info("system", f"Server running on port {self.config.network.udp_port}")
-    
-    def stop(self) -> None:
-        """Stop the server."""
-        self.logger.info("system", "Stopping server")
-        
-        self._running = False
+        try:
+            self._run_loop()
+        except Exception as e:
+            self.logger.error("system", f"Fatal error in main loop: {e}")
+        finally:
+            self.stop()
+
+    def stop(self):
+        """Stop all server components cleanly."""
+        self.running = False
         self.udp_server.stop()
-        
-        if self.ws_server:
-            self.ws_server.stop()
-        
+        self.ws_server.stop()
         if self.visualizer:
             self.visualizer.close()
-    
-    def _signal_handler(self, signum, frame) -> None:
-        """Handle shutdown signals."""
-        self.stop()
-    
-    def process_frame(self) -> None:
-        """Process one frame of telemetry."""
-        self._frame_count += 1
-        
-        # Decay voxel grid
-        self.voxel_grid.decay()
-        
-        # Get all available packets
-        packets = self.udp_server.get_packets(max_count=100)
-        
-        for received in packets:
-            self._process_packet(received.packet, received.receive_time)
-        
-        # Extract detections from voxel grid
-        with Timer(METRIC_VOXEL_UPDATE_TIME):
-            detection_positions = self.voxel_grid.get_detections()
-        
-        # Convert to Detection objects
-        detections = [
-            Detection(position=pos, confidence=1.0, timestamp=time.time())
-            for pos in detection_positions
-        ]
-        
-        # Update tracker
-        result = self.tracker.update(detections)
-        
-        # Update metrics
-        self.metrics.set_gauge(METRIC_ACTIVE_TRACKS, len(result.tracks))
-        self.metrics.increment_counter(METRIC_PACKETS_PROCESSED, len(packets))
-        
-        # Run calibration and apply corrections to ray builder
-        cal_results = self.calibrator.process()
-        for cal_result in cal_results:
-            if cal_result.approved:
-                self.ray_builder.set_calibration_offset(
-                    cal_result.camera_id,
-                    cal_result.correction_quaternion
-                )
-        
-        # Track FPS
-        now = time.time()
-        if self._last_frame_time > 0:
-            dt = now - self._last_frame_time
-            if dt > 0:
-                alpha = 0.1
-                self._fps = alpha * (1.0 / dt) + (1 - alpha) * self._fps
-        self._last_frame_time = now
-        
-        # Update visualizer (reuse detection_positions to avoid redundant computation)
-        if self.visualizer:
-            self._update_visualizer(detection_positions)
-            
-        # Broadcast state via WebSocket
-        if self.ws_server:
-            self._broadcast_state()
-    
-    def _broadcast_state(self) -> None:
-        """Broadcast system state to UI."""
-        # 1. System Status
-        grid_stats = self.voxel_grid.get_stats()
-        self.ws_server.broadcast("SYSTEM_STATUS", {
-            "server_fps": round(self._fps, 1),
-            "total_tracks": len(self.tracker.get_confirmed_tracks()),
-            "total_voxels": grid_stats['hot_count'],
-            "uptime_seconds": round(time.time() - self._start_time, 1),
-            "cpu_percent": 0.0,
-            "memory_percent": 0.0
-        })
-        
-        # 2. Tracks (consolidated)
-        tracks = []
-        for track in self.tracker.get_confirmed_tracks():
-            vel = track.velocity
-            tracks.append({
-                "track_id": track.track_id,
-                "state": int(track.state),
-                "position": [track.position[0], track.position[1], track.position[2]],
-                "velocity": [float(vel[0]), float(vel[1]), float(vel[2])],
-                "covariance": [],
-                "first_seen": track.created_at,
-                "last_seen": track.last_update,
-                "hit_count": track.hits,
-                "confidence": track.confidence,
-                "predicted_next": [0,0,0],
-                "physical_size": float(getattr(track, 'physical_size', 0.0))
-            })
-        self.ws_server.broadcast("TRACK_UPDATE", tracks)
-        
-        # 3. Nodes (with config)
-        nodes = []
-        for node_id, record in self.node_health.get_all_nodes().items():
-            # Map status string to integer
-            # HEALTHY=0, DEGRADED=1, UNHEALTHY=2, OFFLINE=3
-            status_val = 3
-            rec_status = record.get_status().value
-            if rec_status == "healthy": status_val = 0
-            elif rec_status == "degraded": status_val = 1
-            elif rec_status == "unhealthy": status_val = 2
-            elif rec_status == "offline": status_val = 3
-            
-            nodes.append({
-                "node_id": node_id,
-                "status": status_val,
-                "last_seen": record.last_packet_time,
-                "fps": record.packets_per_second,
-                "cpu_usage": 0.0,
-                "temp_c": 0.0,
-                "ip_address": "unknown",
-                "location": [0,0,0], # TODO: Link to ray_builder camera positions
-                # Extra config fields can be merged if frontend supports them
-                "config": record.sensor_config
-            })
-        self.ws_server.broadcast("NODE_UPDATE", nodes)
+        self.logger.info("system", "OpticalRadar server shutdown complete")
 
-    def _process_packet(self, packet: object, receive_time: float) -> None:
-        """Process a single telemetry packet based on its type."""
-        # Route based on packet type
-        if packet.packet_type == PACKET_TYPE_GROUND_TRUTH:
-            self._process_ground_truth_packet(packet)
-            return
-            
-        if packet.packet_type == PACKET_TYPE_ANNOUNCE:
-            self._process_announce_packet(packet)
-            return
-        
-        # Default: process as telemetry
-        if packet.packet_type == PACKET_TYPE_TELEMETRY:
-            self._process_telemetry_packet(packet, receive_time)
+    def _process_ground_truth_packet(self, gt_packet, address):
+        """Process an incoming ground truth packet."""
+        self.logger.debug("network", f"Received Ground Truth from {address}")
 
-    def _process_announce_packet(self, packet: AnnouncePacket) -> None:
-        """Process announce packet."""
-        config = {
-            "fov": packet.fov_horizontal,
-            "fov_v": packet.fov_vertical,
-            "resolution": [packet.resolution_width, packet.resolution_height],
-            "fps": packet.fps
-        }
-        self.node_health.update_node_config(packet.camera_id, config)
-        self.logger.info("network", f"Received announcement from {packet.camera_id}")
-    
-    def _process_ground_truth_packet(self, packet: TelemetryPacket) -> None:
-        """Process ground truth packet for validation.
-        
-        Ground truth packets use the same telemetry format but are tagged as
-        PACKET_TYPE_GROUND_TRUTH. The vectors represent known target positions
-        encoded as azimuth/elevation from the camera. We reconstruct the 3D
-        ray and register the direction with the ground truth validator.
-        """
-        timestamp = packet.timestamp
-        camera_id = packet.camera_id
-        
-        # Build rays from the ground truth vectors (same pipeline as telemetry)
-        rays = self.ray_builder.build_rays_from_packet(packet)
-        
-        for i, ray in enumerate(rays):
-            # Use the ray origin + direction to register the ground truth position
-            # For ground truth, we assume the vector points at the actual object
-            self.ground_truth.add_ground_truth(
-                object_id=f"gt_{camera_id}_{i}",
-                position=ray.origin + ray.direction * 100.0,  # Project along ray
-                timestamp=timestamp
+        # We process ground truth across all clusters for now,
+        # or we could associate it with a specific cluster if GT packets included a cluster_id.
+        for cluster_id, cluster in self.cluster_manager.get_all_clusters().items():
+            cam_pos = cluster.ray_builder.get_camera_position("GT_SOURCE") # Fake source
+            if cam_pos is None:
+               cam_pos = [0.0, 0.0, 0.0]
+
+            # Generate fake rays representing the GT target to feed into the tracker
+            # This allows the GT target to be tracked and evaluated.
+            lat, lon, alt = gt_packet.latitude, gt_packet.longitude, gt_packet.altitude
+            
+            # Use ray_builder to create dummy rays just to inject the position
+            rays = cluster.ray_builder.build_rays_from_packet(
+               "GT_SOURCE",
+               lat, lon, alt,
+               (1.0, 0.0, 0.0, 0.0), # Identity orientation
+               [] # No vectors
             )
+            
+            # Extract target ID from packet (assuming it's in the packet, otherwise use 0)
+            target_id = getattr(gt_packet, 'target_id', 0)
+
+            self.gt_evaluator.process_ground_truth(
+                gt_packet
+            )
+
+    def _process_announce_packet(self, announce_packet, address):
+        """Process a node announcement packet."""
+        node_id = announce_packet.camera_id
+        self.logger.info("network", f"Node announcement received from {node_id} at {address}")
+
+        # Auto-assign to DEFAULT cluster for now if unassigned
+        if not self.cluster_manager.get_cluster_for_node(node_id):
+            self.cluster_manager.assign_node(node_id, 'DEFAULT')
+
+    def _process_packet(self, packet, address):
+        """Route a packet to the correct cluster based on camera_id."""
+
+        # Security Check
+        if self.authenticator and hasattr(packet, 'signature'):
+            if not self.authenticator.verify_packet(packet):
+                self.logger.warning("security", f"Signature verification failed for packet from {address}")
+                return
+
+        if packet.packet_type == PACKET_TYPE_GROUND_TRUTH:
+             self._process_ground_truth_packet(packet, address)
+             return
+
+        if packet.packet_type == PACKET_TYPE_ANNOUNCE:
+            self._process_announce_packet(packet, address)
+            return
+
+        if packet.packet_type != PACKET_TYPE_TELEMETRY:
+            self.logger.warning("network", f"Unknown packet type {packet.packet_type} from {address}")
+            return
+
+        node_id = packet.camera_id
         
-        self.logger.debug("validation", f"Received ground truth from {packet.camera_id}")
-    
-    def _process_telemetry_packet(self, packet: TelemetryPacket, receive_time: float) -> None:
-        """Process telemetry packet from camera."""
         # Update node health
-        self.node_health.record_packet(
-            packet.camera_id,
-            packet.timestamp,
-            packet.sequence_number,
-            packet.health_flags
+        self.health_monitor.update(
+            node_id=node_id,
+            battery=packet.battery_level,
+            temp=packet.temperature,
+            status=packet.status_flags
         )
-        
-        # Build rays from vectors
-        vectors = [
-            (v.azimuth, v.elevation, v.intensity)
-            for v in packet.vectors
-        ]
-        
-        rays = self.ray_builder.build_rays_from_packet(
-            packet.camera_id,
+
+        # Route to specific cluster
+        cluster = self.cluster_manager.get_cluster_for_node(node_id)
+        if not cluster:
+            # Node is unassigned (in pending pool), do not process telemetry for tracking
+            return
+
+        # 1. Build Rays
+        rays = cluster.ray_builder.build_rays_from_packet(
+            node_id,
             packet.latitude,
             packet.longitude,
             packet.altitude,
             packet.orientation,
-            vectors
+            packet.vectors
         )
         
-        # Add all rays to voxel grid
-        for ray in rays:
-            self.voxel_grid.add_ray(
-                ray.origin,
-                ray.direction,
-                ray.intensity
-            )
+        # 2. Add to Voxel Grid
+        cluster.voxel_grid.add_rays_batch(rays)
         
-        # ===== CALIBRATION FIX =====
-        # Use CONFIRMED TRACKS for calibration, not raw hot voxels.
-        # This prevents circular self-validation where a camera
-        # calibrates against its own freshly-painted voxel.
-        confirmed_tracks = self.tracker.get_confirmed_tracks()
-        
-        if confirmed_tracks and rays:
-            # Use tracker-confirmed positions (filtered by multiple observations)
-            track_positions = np.array([t.position for t in confirmed_tracks])
-            
-            for ray in rays:
-                # Find the confirmed track that this ray points toward
-                match_result = self._find_best_matching_voxel(
-                    ray.origin, ray.direction, track_positions
-                )
-                
-                if match_result is not None:
-                    best_position, track_idx = match_result
+        # Provide rays for visualization if this cluster is active
+        # In a real UI, we'd visualize the active cluster. For headless/legacy, we combine or pick default.
+        if self.visualizer:
+            self.visualizer.update_rays(rays)
 
-                    self.calibrator.add_observation(
-                        packet.camera_id,
-                        ray.direction,
-                        best_position,
-                        ray.origin
-                    )
+        # 3. Broadcast Node Update (Global)
+        cam_pos = cluster.ray_builder.get_camera_position(node_id)
+        if cam_pos is None:
+            cam_pos = [0.0, 0.0, 0.0]
 
-                    # Estimate physical size and update track
-                    if hasattr(ray, 'angular_size') and ray.angular_size > 0:
-                        dist = np.linalg.norm(best_position - ray.origin)
-                        # Physical Size = 2 * D * tan(theta / 2)
-                        estimated_size = 2.0 * dist * np.tan(np.radians(ray.angular_size) / 2.0)
+        self.ws_server.broadcast_node_update({
+            "id": node_id,
+            "cluster_id": cluster.cluster_id,
+            "location": cam_pos,
+            "status": "active",
+            "battery": packet.battery_level,
+            "last_seen": time.time()
+        })
 
-                        track = confirmed_tracks[track_idx]
-                        self.tracker._track_manager.update_track(
-                            track.track_id,
-                            best_position,
-                            0.0, # no time step for pure size update
-                            physical_size=estimated_size
-                        )
-    
-    def _find_best_matching_voxel(
-        self,
-        ray_origin: np.ndarray,
-        ray_direction: np.ndarray,
-        candidate_positions: np.ndarray
-    ) -> Optional[Tuple[np.ndarray, int]]:
-        """
-        Find the position that best matches a ray's direction.
-        
-        Uses ray-point distance to find the closest position to the ray.
-        Works for both hot voxels and confirmed track positions.
 
-        Returns:
-            Tuple of (closest_position, index) or None
-        """
-        if len(candidate_positions) == 0:
-            return None
-        
-        # Calculate distance from each position to the ray
-        # Distance = ||(P - O) - ((P - O) . D) * D|| where P=point, O=origin, D=direction
-        to_points = candidate_positions - ray_origin
-        projections = np.dot(to_points, ray_direction)
-        
-        # Only consider positions in front of the camera (positive projection)
-        valid_mask = projections > 0
-        if not np.any(valid_mask):
-            return None
-        
-        # Calculate perpendicular distance to ray
-        closest_on_ray = ray_origin + projections[:, np.newaxis] * ray_direction
-        distances = np.linalg.norm(candidate_positions - closest_on_ray, axis=1)
-        
-        # Mask out positions behind camera
-        distances[~valid_mask] = float('inf')
-        
-        # Return the closest position within a reasonable threshold (e.g., 10m)
-        min_idx = np.argmin(distances)
-        if distances[min_idx] < 10.0:
-            return (candidate_positions[min_idx], min_idx)
-        
-        return None
-    
-    def _update_visualizer(self, detections: list = None) -> None:
-        """Update the visualization."""
-        if not self.visualizer:
-            return
-        
-        # Use provided detections or fetch fresh
-        if detections is None:
-            detections = self.voxel_grid.get_detections()
-        
-        # Get camera positions
-        cameras = [
-            (cam_id, self.ray_builder.get_camera_position(cam_id))
-            for cam_id in self.ray_builder.get_all_cameras()
-        ]
-        cameras = [(cid, pos) for cid, pos in cameras if pos is not None]
-        
-        # Get track positions
-        tracks = [
-            (track.track_id, track.position)
-            for track in self.tracker.get_confirmed_tracks()
-        ]
-        
-        # Get hot voxels
-        hot_voxels = [
-            (v.center, v.heat)
-            for v in self.voxel_grid.get_hot_voxels()[:100]  # Limit for performance
-        ]
-        
-        self.visualizer.update(
-            detections=detections,
-            camera_positions=cameras,
-            tracks=tracks,
-            hot_voxels=hot_voxels
-        )
-    
-    def run(self, target_fps: float = 30.0) -> None:
-        """
-        Main run loop.
-        
-        Args:
-            target_fps: Target frames per second
-        """
-        self.start()
-        
+    def _run_loop(self):
+        """Main processing loop executed at a fixed frequency."""
+        server_config = getattr(self.config, 'server', None)
+        target_fps = getattr(server_config, 'target_fps', 30) if server_config else 30
         frame_time = 1.0 / target_fps
         
-        while self._running:
-            frame_start = time.time()
+        while self.running:
+            loop_start = time.time()
             
-            self.process_frame()
+            # 1. Process all available network packets
+            packets = self.udp_server.get_packets()
+            for packet, address in packets:
+                self._process_packet(packet, address)
+
+            # 2. Tick all active clusters
+            for cluster_id, cluster in self.cluster_manager.get_all_clusters().items():
+
+                # Decay voxels
+                cluster.voxel_grid.decay()
+
+                # Extract detections (hot voxels)
+                detections = cluster.voxel_grid.get_detections()
+
+                # Update Tracker
+                cluster.tracker.update(detections)
+                tracks = cluster.tracker.get_active_tracks()
+
+                # Update visualizer (just combining for local headless vis for now)
+                if self.visualizer:
+                    self.visualizer.update_detections(detections)
+                    self.visualizer.update_tracks(tracks)
+
+                # Evaluate against ground truth
+                if len(self.gt_evaluator.get_metrics()) > 0:
+                     if tracks:
+                          best_track = tracks[0] # Simplification
+                          self.gt_evaluator.evaluate(np.array(best_track.position))
+
+                # Broadcast isolated tracks to clients subscribed to this cluster
+                self._broadcast_tracks(cluster_id, tracks)
             
-            # Rate limiting
-            elapsed = time.time() - frame_start
-            sleep_time = frame_time - elapsed
-            if sleep_time > 0:
-                time.sleep(sleep_time)
-        
-        self.logger.info("system", "Server stopped")
+            # 3. Render Visualization (if enabled)
+            if self.visualizer:
+                self.visualizer.render()
 
+            # 4. Broadcast System Status & Metrics
+            self._calculate_fps(loop_start)
+            if self.frame_count % target_fps == 0:  # ~Once per second
+                self._broadcast_system_status()
 
-def main():
-    """Entry point."""
-    import argparse
-    
-    parser = argparse.ArgumentParser(description="OpticalRadar Server")
-    parser.add_argument("--config", "-c", help="Config file path")
-    parser.add_argument("--port", "-p", type=int, help="UDP port")
-    parser.add_argument("--ref-lat", type=float, default=0.0, help="Reference latitude")
-    parser.add_argument("--ref-lon", type=float, default=0.0, help="Reference longitude")
-    parser.add_argument("--headless", action="store_true", help="Run without visualization")
-    parser.add_argument("--ref-alt", type=float, default=0.0, help="Reference altitude (m)")
-    
-    args = parser.parse_args()
-    
-    server = OpticalRadarServer(
-        config_path=args.config,
-        reference_lat=args.ref_lat,
-        reference_lon=args.ref_lon,
-        reference_alt=args.ref_alt,
-        headless=args.headless
-    )
-    
-    server.run()
+            # 5. Sleep to maintain target FPS
+            elapsed = time.time() - loop_start
+            sleep_time = max(0, frame_time - elapsed)
+            time.sleep(sleep_time)
 
+            self.frame_count += 1
+
+    def process_frame(self):
+        """Legacy helper for testing."""
+        # Tick all active clusters
+        for cluster_id, cluster in self.cluster_manager.get_all_clusters().items():
+            cluster.voxel_grid.decay()
+            detections = cluster.voxel_grid.get_detections()
+            cluster.tracker.update(detections)
+        self._frame_count += 1
+
+    def _broadcast_tracks(self, cluster_id: str, tracks: List['Track']):
+        """Broadcast track data to UI clients subscribed to the specific cluster."""
+        track_data = []
+        for track in tracks:
+            track_data.append({
+                "id": f"T-{track.id}",
+                "position": track.position,
+                "velocity": track.velocity,
+                "confidence": getattr(track, 'confidence', 1.0),
+                "physical_size": getattr(track, 'physical_size', 0.0)
+            })
+
+        # Target specific cluster room
+        if hasattr(self.ws_server, 'broadcast_tracks'):
+            import inspect
+            sig = inspect.signature(self.ws_server.broadcast_tracks)
+            if 'room' in sig.parameters:
+                self.ws_server.broadcast_tracks(track_data, room=cluster_id)
+            else:
+                self.ws_server.broadcast_tracks(track_data)
+
+    def _broadcast_system_status(self):
+        """Broadcast overall system health and cluster topology."""
+
+        # Serialize cluster topology
+        clusters_info = {}
+        for c_id, cluster in self.cluster_manager.get_all_clusters().items():
+            clusters_info[c_id] = {
+                "id": c_id,
+                "nodes": list(cluster.assigned_nodes),
+                "effective_volume": self.cluster_manager.calculate_effective_volume(c_id)
+            }
+
+        status_data = {
+            "fps": round(self.current_fps, 1),
+            "cpu_usage": 0.0, # Placeholder
+            "memory_usage": 0.0, # Placeholder
+            "uptime": int(time.time() - self.last_fps_time), # Roughly
+            "clusters": clusters_info,
+            "pending_nodes": list(self.cluster_manager.pending_nodes)
+        }
+        self.ws_server.broadcast_system_status(status_data)
+
+    def _calculate_fps(self, loop_start: float):
+        """Calculate processing frames per second."""
+        if self.frame_count % 30 == 0:
+            now = time.time()
+            self.current_fps = 30.0 / (now - self.last_fps_time)
+            self.last_fps_time = now
 
 if __name__ == "__main__":
-    main()
+    server = OpticalRadarServer()
+    server.start()
