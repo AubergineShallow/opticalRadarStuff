@@ -1,0 +1,66 @@
+=============================================================================
+Module: server.cluster_manager
+Description: Multi-tenant domain partitioning and isolated pipeline routing.
+             Handles assigning nodes to specific domains, and manages independent
+             VoxelGrid, RayBuilder, and Tracker instances per domain.
+=============================================================================
+
+CLASS Cluster:
+    PROPERTIES:
+        cluster_id: string
+        voxel_grid: VoxelGrid instance configured for this domain
+        ray_builder: RayBuilder instance configured for this domain
+        tracker: Tracker instance configured for this domain
+        assigned_nodes: set of string (node IDs)
+
+    METHOD init(cluster_id, config):
+        self.cluster_id = cluster_id
+        Initialize isolated voxel_grid, ray_builder, and tracker from config
+        self.assigned_nodes = empty set
+
+CLASS ClusterManager:
+    PROPERTIES:
+        clusters: mapping (string -> Cluster instance)
+        node_assignments: mapping (string node_id -> string cluster_id)
+        pending_nodes: set of string (node IDs without explicit assignment)
+
+    METHOD init(config):
+        Initialize empty collections
+        Create default fallback cluster ('DEFAULT')
+
+    METHOD create_cluster(cluster_id):
+        IF cluster_id not in self.clusters:
+            self.clusters[cluster_id] = new Cluster(cluster_id)
+        RETURN self.clusters[cluster_id]
+
+    METHOD assign_node(node_id, cluster_id):
+        IF cluster_id not in self.clusters:
+            RETURN False
+
+        old_cluster_id = self.node_assignments[node_id]
+        IF old_cluster_id exists:
+            Remove node_id from self.clusters[old_cluster_id].assigned_nodes
+
+        self.node_assignments[node_id] = cluster_id
+        Add node_id to self.clusters[cluster_id].assigned_nodes
+        Remove node_id from self.pending_nodes IF present
+        RETURN True
+
+    METHOD get_cluster_for_node(node_id):
+        IF node_id in self.node_assignments:
+            RETURN self.clusters[self.node_assignments[node_id]]
+
+        Add node_id to self.pending_nodes
+        RETURN None
+
+    METHOD get_all_clusters():
+        RETURN self.clusters
+
+    METHOD calculate_effective_volume(cluster_id):
+        cluster = self.clusters[cluster_id]
+        IF cluster has less than 2 assigned_nodes:
+            RETURN 0.0
+
+        Calculate discrete frustum intersection across voxel grid
+        (Simplified placeholder: estimated_intersect_voxels * voxel_volume)
+        RETURN effective_volume
