@@ -4,6 +4,7 @@ PURPOSE: 3D grid for accumulating ray intersections.
 """
 
 import numpy as np
+from scipy.spatial import cKDTree
 from typing import List, Tuple, Optional
 from dataclasses import dataclass
 
@@ -258,7 +259,7 @@ class VoxelGrid:
         cluster_radius: float = 3.0
     ) -> List[np.ndarray]:
         """
-        Cluster nearby hot voxels into detection centroids.
+        Cluster nearby hot voxels into detection centroids using KDTree.
         
         Args:
             hot_voxels: List of hot voxels
@@ -270,35 +271,32 @@ class VoxelGrid:
         if not hot_voxels:
             return []
         
+        positions = np.array([v.center for v in hot_voxels])
+        heats = np.array([v.heat for v in hot_voxels])
+        tree = cKDTree(positions)
+
         clusters = []
-        used = [False] * len(hot_voxels)
+        used = np.zeros(len(hot_voxels), dtype=bool)
         
-        for i, voxel in enumerate(hot_voxels):
+        for i in range(len(hot_voxels)):
             if used[i]:
                 continue
+
+            neighbors = tree.query_ball_point(positions[i], cluster_radius)
             
-            # Start new cluster
-            cluster_positions = [voxel.center]
-            cluster_weights = [voxel.heat]
-            used[i] = True
+            cluster_indices = [idx for idx in neighbors if not used[idx]]
             
-            # Find neighbors
-            for j, other in enumerate(hot_voxels[i+1:], i+1):
-                if used[j]:
-                    continue
+            if not cluster_indices:
+                continue
                 
-                dist = np.linalg.norm(voxel.center - other.center)
-                if dist <= cluster_radius:
-                    cluster_positions.append(other.center)
-                    cluster_weights.append(other.heat)
-                    used[j] = True
-            
-            # Weighted centroid
-            weights = np.array(cluster_weights)
-            positions = np.array(cluster_positions)
-            centroid = np.average(positions, axis=0, weights=weights)
+            for idx in cluster_indices:
+                used[idx] = True
+
+            cluster_pos = positions[cluster_indices]
+            cluster_weights = heats[cluster_indices]
+            centroid = np.average(cluster_pos, axis=0, weights=cluster_weights)
             clusters.append(centroid)
-        
+
         return clusters
     
     def get_detections(
