@@ -16,23 +16,23 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
-import kotlinx.coroutines.flow.collectAsState
+import kotlinx.coroutines.flow.MutableStateFlow
 
+@OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
 
-    // Service binding state
-    private var radarService: RadarService? = null
+    // Backed by Compose state so changes to the binding trigger recomposition
+    private var radarServiceState = mutableStateOf<RadarService?>(null)
     private var serviceBound = false
     private var previewView: PreviewView? = null
 
     private val serviceConnection = object : ServiceConnection {
         override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
             val service = (binder as RadarService.RadarBinder).getService()
-            radarService = service
+            radarServiceState.value = service
             serviceBound = true
 
             // Attach the service's Preview use case to our PreviewView
@@ -42,7 +42,7 @@ class MainActivity : ComponentActivity() {
         }
 
         override fun onServiceDisconnected(name: ComponentName?) {
-            radarService = null
+            radarServiceState.value = null
             serviceBound = false
         }
     }
@@ -65,11 +65,13 @@ class MainActivity : ComponentActivity() {
             var cameraId by remember { mutableStateOf("android_01") }
             var isRunning by remember { mutableStateOf(false) }
 
-            // Collect live stats from the service's StateFlow (Phase 3)
-            val tracksFound by radarService?.tracksFound?.collectAsState()
-                ?: remember { mutableStateOf(0) }
-            val packetsSent by radarService?.packetsSent?.collectAsState()
-                ?: remember { mutableStateOf(0) }
+            // Observe the bound service as Compose state
+            val service = radarServiceState.value
+
+            // Fallback flow so collectAsState always has something to collect from
+            val zeroFlow = remember { MutableStateFlow(0) }
+            val tracksFound by (service?.tracksFound ?: zeroFlow).collectAsState()
+            val packetsSent by (service?.packetsSent ?: zeroFlow).collectAsState()
 
             MaterialTheme {
                 Surface(
@@ -138,7 +140,7 @@ class MainActivity : ComponentActivity() {
                                     if (serviceBound) {
                                         unbindService(serviceConnection)
                                         serviceBound = false
-                                        radarService = null
+                                        radarServiceState.value = null
                                     }
                                     stopService(Intent(this@MainActivity, RadarService::class.java))
                                     isRunning = false
@@ -162,7 +164,7 @@ class MainActivity : ComponentActivity() {
         // Re-attach the preview surface when the Activity comes back to the foreground
         if (serviceBound) {
             previewView?.let { pv ->
-                radarService?.preview?.setSurfaceProvider(pv.surfaceProvider)
+                radarServiceState.value?.preview?.setSurfaceProvider(pv.surfaceProvider)
             }
         }
     }
@@ -170,7 +172,7 @@ class MainActivity : ComponentActivity() {
     override fun onStop() {
         super.onStop()
         // Detach the preview surface — detection (ImageAnalysis) is unaffected
-        radarService?.preview?.setSurfaceProvider(null)
+        radarServiceState.value?.preview?.setSurfaceProvider(null)
     }
 
     override fun onDestroy() {
@@ -186,7 +188,7 @@ class MainActivity : ComponentActivity() {
      * [ServiceConnection] callback can attach the service's Preview use case.
      *
      * This does NOT create its own ProcessCameraProvider — the service owns the
-     * camera.  Two components binding the same physical camera will fight each
+     * camera. Two components binding the same physical camera will fight each
      * other; this approach avoids that.
      */
     @Composable
@@ -199,7 +201,7 @@ class MainActivity : ComponentActivity() {
                     previewView = this
 
                     // If the service is already bound, attach immediately
-                    radarService?.preview?.setSurfaceProvider(surfaceProvider)
+                    radarServiceState.value?.preview?.setSurfaceProvider(surfaceProvider)
                 }
             },
             modifier = Modifier.fillMaxSize()
