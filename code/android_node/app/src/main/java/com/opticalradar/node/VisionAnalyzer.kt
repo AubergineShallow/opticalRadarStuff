@@ -59,7 +59,16 @@ class VisionAnalyzer(
                         val maxDim = maxOf(boxWidth, boxHeight)
                         val angularSize = (maxDim / imgWidth) * horizontalFovDegrees
 
-                        tracks.add(TrackedObject(trackId, azimuth, elevation, angularSize))
+                        // Derive intensity from best label confidence (scaled 0-255).
+                        // ray_builder.py divides this by 255 to use as voxel-grid heat,
+                        // so a high value means "confident detection, strong signal".
+                        val bestConfidence = obj.labels.maxOfOrNull { it.confidence } ?: 1.0f
+                        val intensity = (bestConfidence * 255).toInt().coerceIn(0, 255)
+
+                        // Map ML Kit's label index to class_id (0 if no labels)
+                        val classId = obj.labels.maxByOrNull { it.confidence }?.index ?: 0
+
+                        tracks.add(TrackedObject(trackId, azimuth, elevation, angularSize, intensity, classId))
                     }
                     onTracksUpdated(tracks)
                 }
@@ -79,5 +88,7 @@ data class TrackedObject(
     val trackId: Int,
     val azimuth: Float,
     val elevation: Float,
-    val angularSize: Float
+    val angularSize: Float,
+    val intensity: Int = 200,   // [0, 255] — ML Kit confidence scaled to voxel heat
+    val classId: Int = 0        // [0, 255] — ML Kit label index
 )

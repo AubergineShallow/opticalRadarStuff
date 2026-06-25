@@ -233,11 +233,11 @@ class OpticalRadarServer:
         node_id = packet.camera_id
         
         # Update node health
-        self.health_monitor.update(
+        self.health_monitor.record_packet(
             node_id=node_id,
-            battery=packet.battery_level,
-            temp=packet.temperature,
-            status=packet.status_flags
+            packet_timestamp=packet.timestamp,
+            sequence=packet.sequence_number,
+            health_flags=packet.health_flags
         )
 
         # Route to specific cluster
@@ -290,8 +290,8 @@ class OpticalRadarServer:
             
             # 1. Process all available network packets
             packets = self.udp_server.get_packets()
-            for packet, address in packets:
-                self._process_packet(packet, address)
+            for received in packets:
+                self._process_packet(received.packet, (received.sender_ip, received.sender_port))
 
             # 2. Tick all active clusters
             for cluster_id, cluster in self.cluster_manager.get_all_clusters().items():
