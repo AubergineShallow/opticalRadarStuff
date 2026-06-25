@@ -30,13 +30,22 @@ def compute_cost_matrix(
     if n_tracks == 0 or n_dets == 0:
         return np.zeros((n_tracks, n_dets))
     
-    cost = np.full((n_tracks, n_dets), max_distance * 10, dtype=np.float64)
+    # Stack into (N, 3) / (M, 3) arrays once, then get every pairwise
+    # distance via broadcasting in a single vectorized call instead of
+    # an O(n_tracks * n_dets) Python loop calling np.linalg.norm() per
+    # pair. This matters because this runs every frame, per domain, and
+    # n_tracks can be as large as the configured max_tracks (100 by
+    # default) -- with multiple domains ticking sequentially in one
+    # real-time loop, that loop overhead multiplies fast.
+    tracks_arr = np.asarray(predicted_positions, dtype=np.float64)  # (N, 3)
+    dets_arr = np.asarray(measurements, dtype=np.float64)  # (M, 3)
     
-    for i, track_pos in enumerate(predicted_positions):
-        for j, det_pos in enumerate(measurements):
-            dist = np.linalg.norm(track_pos - det_pos)
-            if dist <= max_distance:
-                cost[i, j] = dist
+    diff = tracks_arr[:, np.newaxis, :] - dets_arr[np.newaxis, :, :]  # (N, M, 3)
+    dist = np.linalg.norm(diff, axis=2)  # (N, M)
+    
+    # Same "invalid pair" sentinel the original loop used, so downstream
+    # logic that filters on `cost <= max_distance` is unaffected.
+    cost = np.where(dist <= max_distance, dist, max_distance * 10)
     
     return cost
 
@@ -110,15 +119,17 @@ def greedy_assignment(
     used_tracks = set()
     used_dets = set()
     
-    # Get all valid (track, det, cost) tuples
-    candidates = []
-    for i in range(n_tracks):
-        for j in range(n_dets):
-            if cost_matrix[i, j] <= max_distance:
-                candidates.append((cost_matrix[i, j], i, j))
-    
-    # Sort by cost (ascending)
-    candidates.sort()
+    # Find all valid (track, det) pairs with one vectorized comparison
+    # over the whole cost matrix instead of an O(n_tracks * n_dets)
+    # Python double loop.
+    valid_i, valid_j = np.where(cost_matrix <= max_distance)
+    candidates = sorted(
+        zip(
+            cost_matrix[valid_i, valid_j].tolist(),
+            valid_i.tolist(),
+            valid_j.tolist(),
+        )
+    )
     
     # Greedily assign
     for cost, track_idx, det_idx in candidates:

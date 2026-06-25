@@ -104,16 +104,13 @@ class Tracker:
             dt = timestamp - self._last_update_time
         self._last_update_time = timestamp
         
-        # Get current tracks
-        active_tracks = self._track_manager.active_tracks
-        
-        # Predict all tracks forward
-        predicted_positions = []
-        track_ids = []
-        for track in active_tracks:
-            self._track_manager.predict_track(track.track_id, dt)
-            predicted_positions.append(track.position)
-            track_ids.append(track.track_id)
+        # Predict all active tracks forward in one vectorized batch call,
+        # instead of looping predict_track() once per track (which used
+        # to rebuild the same dt-dependent F/Q matrices from scratch on
+        # every single track).
+        active_tracks = self._track_manager.predict_all_active(dt)
+        predicted_positions = [track.position for track in active_tracks]
+        track_ids = [track.track_id for track in active_tracks]
         
         # Get detection positions
         measurements = [d.position for d in detections]

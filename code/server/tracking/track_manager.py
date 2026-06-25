@@ -227,6 +227,38 @@ class TrackManager:
         
         return track
     
+    def predict_all_active(self, dt: float) -> List[Track]:
+        """
+        Predict every active track forward by dt in one vectorized call.
+        
+        Equivalent to calling predict_track() on each active track, but
+        avoids both the repeated dict lookups and, more importantly, the
+        per-track reconstruction of the (shared, dt-only-dependent)
+        Kalman F/Q matrices and small matmuls -- those get batched into
+        one call via KalmanFilter.predict_batch() instead of running once
+        per track, every frame, up to max_tracks times.
+        
+        Args:
+            dt: Time step, shared across all active tracks this frame
+        
+        Returns:
+            The active tracks (now predicted forward), same objects as
+            self.active_tracks would return.
+        """
+        tracks = self.active_tracks
+        if not tracks:
+            return []
+        
+        predicted_states = self._kalman.predict_batch(
+            [t.kalman_state for t in tracks], dt
+        )
+        
+        for track, state in zip(tracks, predicted_states):
+            track.kalman_state = state
+            track.age += 1
+        
+        return tracks
+    
     def mark_missed(self, track_id: int) -> Optional[Track]:
         """
         Mark track as missed (no detection this frame).

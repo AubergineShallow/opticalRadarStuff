@@ -156,6 +156,45 @@ class KalmanFilter:
         
         return KalmanState(x=x_pred, P=P_pred)
     
+    def predict_batch(self, states: list, dt: float) -> list:
+        """
+        Predict many tracks forward in time in one vectorized call.
+        
+        Equivalent to calling predict() on each state individually, but
+        much cheaper when there are many active tracks: F and Q only get
+        built once (not once per track), and the per-track matrix algebra
+        becomes a single batched matmul via numpy broadcasting instead of
+        N separate small (6x6) matmuls with their own Python/numpy
+        call overhead.
+        
+        Args:
+            states: List of current KalmanStates (length N)
+            dt: Time step (seconds), shared by all states
+        
+        Returns:
+            List of predicted KalmanStates, same order as input
+        """
+        if not states:
+            return []
+        
+        F = self._get_F(dt)
+        Q = self._get_Q(dt)
+        
+        X = np.stack([s.x for s in states])  # (N, 6)
+        P = np.stack([s.P for s in states])  # (N, 6, 6)
+        
+        # x_pred_i = F @ x_i for every i  <=>  X @ F.T
+        X_pred = X @ F.T  # (N, 6)
+        # P_pred_i = F @ P_i @ F.T + Q for every i.
+        # numpy broadcasts F (6,6) against the leading N dimension of P
+        # automatically, so this runs all N in one vectorized call.
+        P_pred = F @ P @ F.T + Q  # (N, 6, 6)
+        
+        return [
+            KalmanState(x=X_pred[i], P=P_pred[i])
+            for i in range(len(states))
+        ]
+    
     def update(
         self,
         state: KalmanState,
