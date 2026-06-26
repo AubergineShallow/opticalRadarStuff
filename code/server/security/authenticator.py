@@ -8,6 +8,7 @@ import hashlib
 import time
 import os
 from typing import Optional, Tuple
+from .key_manager import KeyManager
 from dataclasses import dataclass
 
 import sys
@@ -16,7 +17,7 @@ _parent = os.path.dirname(os.path.dirname(os.path.dirname(__file__)))
 if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
-from common.protocol import TelemetryPacket, SIGNATURE_SIZE
+from common.protocol import TelemetryPacket, SIGNATURE_SIZE, HEADER_SIZE
 
 
 class AuthenticationError(Exception):
@@ -44,30 +45,18 @@ class Authenticator:
     
     def __init__(
         self,
-        key: Optional[bytes] = None,
-        key_file: Optional[str] = None,
+        key_manager: Optional[KeyManager] = None,
         max_timestamp_drift_sec: float = 30.0
     ):
         """
         Initialize authenticator.
         
         Args:
-            key: Shared secret key (raw bytes)
-            key_file: Path to key file (alternative to key)
+            key_manager: KeyManager instance for key lookups
             max_timestamp_drift_sec: Max allowed age of packets
         """
-        self._keys: list[bytes] = []
+        self.key_manager = key_manager or KeyManager()
         self.max_timestamp_drift = max_timestamp_drift_sec
-        
-        if key:
-            self._keys = [key]
-        elif key_file:
-            self.load_keys_from_file(key_file)
-        else:
-            # Try environment variable
-            env_key = os.environ.get('OPTICAL_RADAR_SECRET_KEY')
-            if env_key:
-                self._keys = [self._decode_key(env_key)]
     
     def _decode_key(self, key_str: str) -> bytes:
         """Decode base64 key string to bytes."""
@@ -116,14 +105,15 @@ class Authenticator:
     @property
     def primary_key(self) -> bytes:
         """Get primary key for signing."""
-        if not self._keys:
+        key = self.key_manager.primary_key
+        if not key:
             raise RuntimeError("No keys loaded")
-        return self._keys[0]
+        return key
     
     @property
     def all_keys(self) -> list[bytes]:
         """Get all valid keys for verification."""
-        return self._keys
+        return self.key_manager.all_valid_keys
     
     def sign(self, data: bytes) -> bytes:
         """
@@ -137,19 +127,20 @@ class Authenticator:
         """
         return hmac.new(self.primary_key, data, hashlib.sha256).digest()
     
-    def verify(self, data: bytes, signature: bytes) -> bool:
+    def verify(self, data: bytes, signature: bytes, node_id: Optional[str] = None) -> bool:
         """
         Verify signature using constant-time comparison.
         
         Args:
             data: Original data
             signature: Claimed signature
+            node_id: Optional node ID for per-node keys (currently uses global all_valid_keys)
         
         Returns:
             True if signature is valid
         """
         # Try all valid keys (for rotation support)
-        for key in self._keys:
+        for key in self.key_manager.all_valid_keys:
             expected = hmac.new(key, data, hashlib.sha256).digest()
             if hmac.compare_digest(expected, signature):
                 return True
@@ -179,14 +170,16 @@ class Authenticator:
         Returns:
             AuthResult with validity and unpacked packet
         """
-        if len(data) < SIGNATURE_SIZE + 60:  # header + signature
+        if len(data) < SIGNATURE_SIZE + HEADER_SIZE:  # header + signature
             return AuthResult(False, "Packet too short")
         
         # Extract signature (last 32 bytes)
         packet_data = data[:-SIGNATURE_SIZE]
         signature = data[-SIGNATURE_SIZE:]
         
-        # Verify signature
+        # Verify signature. We check against all valid keys to support rotation.
+        # Even though we don't know the node_id until unpacked, trying all active
+        # keys is computationally cheap enough.
         if not self.verify(packet_data, signature):
             return AuthResult(False, "Invalid signature")
         

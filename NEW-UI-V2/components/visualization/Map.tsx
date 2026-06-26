@@ -23,6 +23,19 @@ export default function VisualizationMap() {
     const [viewState, setViewState] = useState(UI_CONFIG.INITIAL_VIEW_STATE);
 
     // --- LAYERS ---
+
+    // Filter data based on active cluster
+    const filteredTracks = activeClusterId
+        ? Object.values(tracks).filter(t => t.cluster_id === activeClusterId || !t.cluster_id)
+        : Object.values(tracks);
+
+    const filteredRays = activeClusterId
+        ? rays.filter(r => r.cluster_id === activeClusterId || !r.cluster_id)
+        : rays;
+
+    const filteredVoxels = activeClusterId
+        ? voxels.filter(v => v.cluster_id === activeClusterId || !v.cluster_id)
+        : voxels;
     const layers = [
         // Base Map (Offline Support)
         createBaseMapLayer(),
@@ -32,15 +45,15 @@ export default function VisualizationMap() {
             onSelectNode: selectNode
         }),
         createRayLayer({
-            data: rays,
+            data: filteredRays,
             visible: showRays
         }),
         createVoxelLayer({
-            data: voxels,
+            data: filteredVoxels,
             visible: showVoxels
         }),
         ...createTrackLayers({
-            data: Object.values(tracks),
+            data: filteredTracks,
             onSelectTrack: selectTrack,
             selectedTrackId: selectedTrackId
         })

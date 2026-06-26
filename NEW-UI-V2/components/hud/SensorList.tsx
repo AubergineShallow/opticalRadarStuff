@@ -7,9 +7,10 @@ interface SensorListProps {
     nodes: Record<string, NodeHealth>;
     onSelectNode?: (id: string) => void;
     selectedNodeId?: string | null;
+    onAssignNode?: (nodeId: string) => void;
 }
 
-export function SensorList({ nodes, onSelectNode, selectedNodeId }: SensorListProps) {
+export function SensorList({ nodes, onSelectNode, selectedNodeId, onAssignNode }: SensorListProps) {
     const [isMinimized, setIsMinimized] = useState(false);
     // Note: The UI expects 'sensor_config' which is currently not in the NodeHealth type definition
     // or sent by the backend. We are casting to any for now to facilitate the UI update.

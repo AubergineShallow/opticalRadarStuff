@@ -20,6 +20,14 @@ import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import java.util.concurrent.Executors
+import android.location.Location
+import android.location.LocationListener
+import android.location.LocationManager
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
+import android.os.Bundle
 
 /**
  * Foreground service that owns the camera + ML Kit pipeline and sends
@@ -48,11 +56,52 @@ class RadarService : Service(), LifecycleOwner {
     private var cameraId: String = "android_01"
     private var sequenceNumber: Int = 0
 
-    // --- Sensor placeholders (Phase 5 will wire real values) ------------------
+    // --- Real Sensor values ------------------
     private var currentLat: Double = 0.0
     private var currentLon: Double = 0.0
     private var currentAlt: Float = 0.0f
     private var orientation: FloatArray = floatArrayOf(1.0f, 0.0f, 0.0f, 0.0f)
+
+    private var locationManager: LocationManager? = null
+    private var sensorManager: SensorManager? = null
+    private var rotationVectorSensor: Sensor? = null
+
+    private var lastLocationTimeMs: Long = 0
+    private var hasImuData: Boolean = false
+
+    private val locationListener = object : LocationListener {
+        override fun onLocationChanged(location: Location) {
+            currentLat = location.latitude
+            currentLon = location.longitude
+            currentAlt = location.altitude.toFloat()
+            lastLocationTimeMs = System.currentTimeMillis()
+        }
+        override fun onStatusChanged(provider: String?, status: Int, extras: Bundle?) {}
+        override fun onProviderEnabled(provider: String) {}
+        override fun onProviderDisabled(provider: String) {}
+    }
+
+    private val sensorEventListener = object : SensorEventListener {
+        override fun onSensorChanged(event: SensorEvent) {
+            if (event.sensor.type == Sensor.TYPE_ROTATION_VECTOR) {
+                // Get quaternion from rotation vector
+                // The Android rotation vector is defined as [x, y, z, w(optional)] where w = cos(theta/2).
+                // Android's SensorManager.getQuaternionFromVector outputs [w, x, y, z]
+                val q = FloatArray(4)
+                SensorManager.getQuaternionFromVector(q, event.values)
+
+                // Python's ray_builder assumes a specific ENU convention.
+                // We'll pass the w,x,y,z directly, matching the rpi_node's layout.
+                orientation[0] = q[0] // w
+                orientation[1] = q[1] // x
+                orientation[2] = q[2] // y
+                orientation[3] = q[3] // z
+                hasImuData = true
+            }
+        }
+
+        override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+    }
 
     // --- Camera use cases exposed to the activity ----------------------------
     var preview: Preview? = null
@@ -106,6 +155,9 @@ class RadarService : Service(), LifecycleOwner {
             lifecycleRegistry.handleLifecycleEvent(Lifecycle.Event.ON_RESUME)
         }
 
+        // Initialize sensors
+        initSensors()
+
         // Initialise camera + analysis pipeline
         initCameraAndAnalysis()
 
@@ -155,6 +207,13 @@ class RadarService : Service(), LifecycleOwner {
         scope.cancel()
         udpClient?.close()
         udpClient = null
+
+        try {
+            locationManager?.removeUpdates(locationListener)
+            sensorManager?.unregisterListener(sensorEventListener)
+        } catch (e: Exception) {
+            e.printStackTrace()
+        }
     }
 
     // =========================================================================
@@ -223,7 +282,7 @@ class RadarService : Service(), LifecycleOwner {
                     longitude = currentLon,
                     altitude = currentAlt,
                     orientation = orientation,
-                    healthFlags = 0x07.toByte(), // GPS_OK | CAMERA_OK | IMU_OK
+                    healthFlags = computeHealthFlags(),
                     tracks = tracks
                 )
                 _packetsSent.value += 1
@@ -233,6 +292,22 @@ class RadarService : Service(), LifecycleOwner {
         }
     }
 
+    private fun computeHealthFlags(): Byte {
+        var flags = 0
+        // CAMERA_OK (bit 1)
+        if (preview != null) flags = flags or 0x02
+
+        // GPS_OK (bit 0) - valid if less than 10 seconds old
+        val now = System.currentTimeMillis()
+        if (lastLocationTimeMs > 0 && (now - lastLocationTimeMs) < 10000) {
+            flags = flags or 0x01
+        }
+
+        // IMU_OK (bit 2)
+        if (hasImuData) flags = flags or 0x04
+
+        return flags.toByte()
+    }
     // =========================================================================
     // Notification plumbing
     // =========================================================================

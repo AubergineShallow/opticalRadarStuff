@@ -1,3 +1,9 @@
+export interface ClusterInfo {
+    cluster_id: string;
+    node_ids: string[];
+    track_count: number;
+    voxel_resolution_m: number;
+}
 /**
  * OpticalRadar Data Types
  * Closely matching backend implementation conventions.
@@ -17,6 +23,7 @@ export interface MotionVector {
 
 // Ray: Visual representation of a MotionVector in 3D space
 export interface Ray {
+    cluster_id?: string;
     origin: Vector3;       // Camera position (ENU)
     direction: Vector3;    // Normalized direction vector
     intensity: number;     // [0, 255]
@@ -26,6 +33,7 @@ export interface Ray {
 
 // Voxel: 3D Grid Unit
 export interface Voxel {
+    cluster_id?: string;
     x: number; // ENU Center X (Meters)
     y: number; // ENU Center Y (Meters)
     z: number; // ENU Center Z (Meters)
@@ -41,6 +49,7 @@ export enum TrackState {
 }
 
 export interface Track {
+    cluster_id?: string;
     track_id: number;
     state: TrackState;
     position: Vector3;      // ENU [East, North, Up]
@@ -61,6 +70,7 @@ export enum NodeHealthStatus {
 }
 
 export interface NodeHealth {
+    cluster_id?: string;
     node_id: string;
     status: NodeHealthStatus;
     last_seen: number;     // Unix timestamp
@@ -81,6 +91,6 @@ export interface SystemStatus {
 }
 
 export interface WSMessage {
-    type: 'TRACK_UPDATE' | 'VOXEL_UPDATE' | 'RAY_UPDATE' | 'NODE_UPDATE' | 'SYSTEM_STATUS';
+    type: 'TRACK_UPDATE' | 'VOXEL_UPDATE' | 'RAY_UPDATE' | 'NODE_UPDATE' | 'SYSTEM_STATUS' | 'CLUSTER_UPDATE';
     payload: any;
 }
