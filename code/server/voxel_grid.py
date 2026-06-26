@@ -198,9 +198,9 @@ class VoxelGrid:
         
         # Use native batch processing if available
         if _NATIVE_MODULE is not None:
-            origins = np.array([r[0] for r in rays], dtype=np.float32)
-            directions = np.array([r[1] for r in rays], dtype=np.float32)
-            intensities = np.array([r[2] for r in rays], dtype=np.float32)
+            origins = np.array([r.origin if hasattr(r, 'origin') else r[0] for r in rays], dtype=np.float32)
+            directions = np.array([r.direction if hasattr(r, 'direction') else r[1] for r in rays], dtype=np.float32)
+            intensities = np.array([r.intensity if hasattr(r, 'intensity') else r[2] for r in rays], dtype=np.float32)
             
             return _NATIVE_MODULE.add_rays_batch(
                 self.grid,

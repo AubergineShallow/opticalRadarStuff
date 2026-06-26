@@ -13,10 +13,19 @@ export function useWebSocket(url: string, enabled: boolean = true) {
         setVoxels,
         setRays,
         updateNode,
-        updateSystemStatus
+        updateSystemStatus,
+        setClusters,
+        setPendingNodes
     } = useAppStore();
 
     const [isConnected, setIsConnected] = useState(false);
+    const sendCommand = (cmd: string, data?: any) => {
+        if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+            wsRef.current.send(JSON.stringify({ type: cmd, payload: data || {} }));
+        } else {
+            console.warn('[WebSocket] Cannot send command, socket not open:', cmd);
+        }
+    };
     const wsRef = useRef<WebSocket | null>(null);
 
     useEffect(() => {
@@ -66,6 +75,17 @@ export function useWebSocket(url: string, enabled: boolean = true) {
                         break;
                     case 'SYSTEM_STATUS':
                         updateSystemStatus(message.payload);
+                        if (message.payload.clusters) {
+                            setClusters(message.payload.clusters);
+                        }
+                        if (message.payload.pending_nodes) {
+                            setPendingNodes(message.payload.pending_nodes);
+                        }
+                        break;
+                    case 'CLUSTER_UPDATE':
+                        if (message.payload.clusters) {
+                            setClusters(message.payload.clusters);
+                        }
                         break;
                     default:
                         console.warn('[WebSocket] Unknown message type:', (message as any).type);
@@ -82,7 +102,7 @@ export function useWebSocket(url: string, enabled: boolean = true) {
         };
     }, [url, enabled, setTracks, setVoxels, setRays, updateNode, updateSystemStatus]);
 
-    return { isConnected };
+    return { isConnected, sendCommand };
 }
 
 export function useMockData(enabled: boolean = true) {
