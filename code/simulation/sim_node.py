@@ -1,3 +1,4 @@
+
 """
 sim_node.py
 PURPOSE: Simulated camera node for testing without real hardware.

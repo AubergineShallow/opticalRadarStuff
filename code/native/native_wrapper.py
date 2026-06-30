@@ -1,3 +1,4 @@
+
 """
 Native module wrapper with Python fallback.
 

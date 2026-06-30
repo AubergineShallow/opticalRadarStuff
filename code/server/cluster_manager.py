@@ -1,3 +1,4 @@
+
 import math
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Set
@@ -19,8 +20,12 @@ class Cluster:
         vg_config.height_m = vg_config_dict.get('height_m', 100.0)
         vg_config.depth_m = vg_config_dict.get('depth_m', 200.0)
         vg_config.resolution_m = vg_config_dict.get('resolution_m', 1.0)
-        vg_config.decay_rate = vg_config_dict.get('decay_rate', 0.1)
-        vg_config.detection_threshold = vg_config_dict.get('detection_threshold', 1.5)
+        # P1.2: VoxelGridConfig.decay_rate default is 0.95 (half-life ~14 frames).
+        # 0.1 made the accumulator nearly useless (heat halved in ~2 frames @30Hz).
+        vg_config.decay_rate = vg_config_dict.get('decay_rate', 0.95)
+        # P0.4: the field is hot_threshold, not detection_threshold. Writing
+        # detection_threshold silently created a dead attribute nothing reads.
+        vg_config.hot_threshold = vg_config_dict.get('hot_threshold', 5.0)
         self.voxel_grid = VoxelGrid(vg_config)
 
         sim_config = getattr(config, 'simulation', {})
@@ -31,7 +36,21 @@ class Cluster:
         ref_alt = sim_config.get('origin_alt', 0.0)
         self.ray_builder = RayBuilder(ref_lat, ref_lon, ref_alt)
 
-        self.tracker = Tracker(config)
+        # Tracker takes individual solver parameters, not a Config object (same
+        # bug class as P1.1's Calibrator(self.config)). Map the tracking config
+        # section onto the constructor; fall back to defaults if absent.
+        tracking_cfg = getattr(config, 'tracking', None)
+        if tracking_cfg is not None and not isinstance(tracking_cfg, dict):
+            self.tracker = Tracker(
+                distance_threshold=tracking_cfg.distance_threshold_m,
+                min_hits_to_confirm=tracking_cfg.min_hits_to_confirm,
+                max_misses_to_delete=tracking_cfg.max_misses_to_delete,
+                max_tracks=tracking_cfg.max_tracks,
+                q_process_noise=tracking_cfg.q_process_noise,
+                r_measurement_noise=tracking_cfg.r_measurement_noise,
+            )
+        else:
+            self.tracker = Tracker()
 
         # Nodes explicitly assigned to this cluster
         self.assigned_nodes: Set[str] = set()
@@ -107,7 +126,8 @@ class ClusterManager:
         # For a true implementation, we would raycast from every camera to every voxel
         # to check frustum intersection.
         # As a placeholder/simplified calculation for the current step:
-        voxel_vol = grid.config.resolution ** 3
+        # P0.3: VoxelGridConfig field is resolution_m, not resolution.
+        voxel_vol = grid.config.resolution_m ** 3
 
         # Assume each camera covers ~1000 voxels, and intersection is roughly 20%
         # This will be replaced with true geometric projection later.

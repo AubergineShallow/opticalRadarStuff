@@ -1,3 +1,4 @@
+
 """
 esp32_stub.py
 PURPOSE: Python stub for ESP32 communication and coordination.
