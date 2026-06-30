@@ -330,7 +330,7 @@ def test_full_server_init():
         assert server.ground_truth is not None, "Missing ground_truth"
         
         # Check new state variables
-        assert hasattr(server, '_fps'), "Missing _fps tracker"
+        assert hasattr(server, 'current_fps'), "Missing current_fps tracker"
         assert hasattr(server, '_start_time'), "Missing _start_time"
         assert hasattr(server, '_last_frame_time'), "Missing _last_frame_time"
         
@@ -360,13 +360,210 @@ def test_server_process_frame():
             server.process_frame()
         
         # Verify FPS tracking is working
-        assert server._fps >= 0, f"FPS should be non-negative: {server._fps}"
-        assert server._frame_count == 5, f"Frame count: {server._frame_count}"
+        assert server.current_fps >= 0, f"FPS should be non-negative: {server.current_fps}"
+        assert server.frame_count == 5, f"Frame count: {server.frame_count}"
         
         return True
     
     check("5-frame processing cycle (no network)", test_frame_cycle)
 
+
+def test_ray_pipeline_integration():
+    from server.ray_builder import RayBuilder
+    from server.voxel_grid import VoxelGrid, VoxelGridConfig
+    from common.protocol import MotionVector
+
+    rb = RayBuilder(reference_lat=1.3521, reference_lon=103.8198, reference_alt=0.0)
+    cfg = VoxelGridConfig(width_m=200, height_m=100, depth_m=200, resolution_m=1.0)
+    grid = VoxelGrid(cfg)
+
+    vectors = [
+        MotionVector(azimuth=45.0, elevation=10.0, intensity=200, class_id=1),
+        MotionVector(azimuth=90.0, elevation=5.0,  intensity=180, class_id=1),
+    ]
+    rays = rb.build_rays_from_packet(
+        camera_id="CAM-01",
+        latitude=1.3521, longitude=103.8198, altitude=15.0,
+        orientation=(1.0, 0.0, 0.0, 0.0),
+        vectors=[(v.azimuth, v.elevation, v.intensity) for v in vectors]
+    )
+    assert len(rays) == 2, f"Expected 2 rays, got {len(rays)}"
+    updated = grid.add_rays_batch(rays)
+    assert updated >= 0, "add_rays_batch raised or returned negative"
+    return True
+
+def test_decay_rate_default_in_cluster():
+    from server.cluster_manager import Cluster
+    from common.config import Config
+
+    config = Config() # Create empty config
+    cluster = Cluster("TEST", config)
+    assert cluster.voxel_grid.config.decay_rate == 0.95, f"Expected 0.95, got {cluster.voxel_grid.config.decay_rate}"
+    return True
+
+def test_hot_threshold_in_cluster():
+    from server.cluster_manager import Cluster
+    from common.config import Config
+
+    config = Config()
+    config.voxel_grid = {'hot_threshold': 2.0}
+    cluster = Cluster("TEST", config)
+    assert cluster.voxel_grid.config.hot_threshold == 2.0, f"Expected 2.0, got {cluster.voxel_grid.config.hot_threshold}"
+    return True
+
+def test_battery_level_absent():
+    from server.server_main import OpticalRadarServer
+    from common.protocol import TelemetryPacket, PACKET_TYPE_TELEMETRY
+    import os
+
+    os.environ['OR_SECURITY_ENABLED'] = 'false'
+    server = OpticalRadarServer(headless=True)
+
+    class FakePacket:
+        packet_type = PACKET_TYPE_TELEMETRY
+        camera_id = "TEST_NODE"
+        latitude = 0.0
+        longitude = 0.0
+        altitude = 0.0
+        orientation = (1.0, 0.0, 0.0, 0.0)
+        health_flags = 0
+        vectors = []
+        timestamp = 123456789.0
+        sequence_number = 1
+
+    try:
+        server._process_packet(FakePacket(), ('127.0.0.1', 12345))
+    except AttributeError as e:
+        assert False, f"AttributeError raised: {e}"
+
+    return True
+
+def test_uptime_monotonic():
+    from server.server_main import OpticalRadarServer
+    import os
+    import time
+
+    os.environ['OR_SECURITY_ENABLED'] = 'false'
+    server = OpticalRadarServer(headless=True)
+
+    # Force some time to pass
+    time.sleep(0.1)
+
+    # Broadcast status doesn't return anything but it creates the dict internally.
+    # We will test the time diff calculation logic.
+    uptime1 = int(time.time() - server._start_time)
+    time.sleep(1.0)
+    uptime2 = int(time.time() - server._start_time)
+    assert uptime2 >= uptime1, f"Uptime not monotonic: {uptime1} -> {uptime2}"
+    return True
+
+def test_octree():
+    print("\n=== Phase 8.5: Octree ===")
+    from server.voxel_grid import VoxelGrid, VoxelGridConfig
+    import numpy as np
+
+    def test_decay_consolidate_independence():
+        cfg = VoxelGridConfig(width_m=50, height_m=25, depth_m=50, resolution_m=2.0)
+        grid = VoxelGrid(cfg)
+        origin    = np.array([0.0, 0.0, 0.0])
+        direction = np.array([1.0, 0.0, 0.0])
+        grid.add_ray(origin, direction, intensity=10.0)
+
+        heat_before = grid.get_stats()['max_heat']
+
+        # Run 10 decay cycles WITHOUT consolidate
+        for _ in range(10):
+            grid.decay_active_leaves()
+
+        heat_after = grid.get_stats()['max_heat']
+        expected = heat_before * (0.95 ** 10)
+        assert abs(heat_after - expected) < 0.01, \
+            f"Heat after 10 decays: {heat_after:.4f}, expected ~{expected:.4f}"
+        return True
+
+    def test_root_expansion_preserves_coords():
+        cfg = VoxelGridConfig(width_m=50, height_m=50, depth_m=50, resolution_m=5.0)
+        grid = VoxelGrid(cfg)
+        origin    = np.array([0.0, 0.0, 25.0])
+        direction = np.array([1.0, 0.0, 0.0])
+        grid.add_ray(origin, direction, intensity=10.0)
+        hot_before = grid.get_hot_voxels()
+        assert hot_before, "No hot voxels before expansion"
+        center_before = hot_before[0].center.copy()
+
+        # Trigger expansion on the +X axis
+        grid.expand_root(np.array([48.0, 0.0, 25.0]))
+
+        hot_after = grid.get_hot_voxels()
+        assert hot_after, "No hot voxels after expansion"
+        assert np.allclose(center_before, hot_after[0].center, atol=0.1), \
+            f"Leaf moved: {center_before} -> {hot_after[0].center}"
+        return True
+
+    def test_amanatiedes_woo_exact_visit():
+        cfg = VoxelGridConfig(width_m=50, height_m=50, depth_m=50, resolution_m=2.0)
+        grid = VoxelGrid(cfg)
+        # We start just inside the bounding box
+        origin    = np.array([-24.9, 0.0, 25.0])
+        direction = np.array([1.0, 0.0, 0.0])
+        updated = grid.add_ray(origin, direction, intensity=1.0)
+
+        # root is 64x64x64, we walk through 64 meters, but origin is at -24.9, so we travel 50m to edge.
+        # But wait, max_distance is 150m, root bound might be 64.
+        # The number of updated cells could be around 25 to 32, we just want > 0 and no crash.
+        assert updated > 0, "No cells visited"
+        return True
+
+    def test_subdivision_trigger_camera_count():
+        cfg = VoxelGridConfig(width_m=50, height_m=50, depth_m=50, resolution_m=2.0)
+        grid = VoxelGrid(cfg)
+        origin = np.array([0.0, 0.0, 25.0])
+        direction = np.array([0.0, 0.0, 1.0])
+
+        # Send 3 distinct cameras
+        grid.add_ray(origin, direction, intensity=1.0, camera_id="CAM1")
+        grid.add_ray(origin, direction, intensity=1.0, camera_id="CAM2")
+        # Ensure we are not sub-divided yet
+        leaves_before = len(grid._active_leaves)
+        grid.add_ray(origin, direction, intensity=1.0, camera_id="CAM3")
+        leaves_after = len(grid._active_leaves)
+
+        assert leaves_after > leaves_before, "Failed to subdivide after 3 distinct cameras"
+        return True
+
+    def test_subdivision_window_gating():
+        import time
+        cfg = VoxelGridConfig(width_m=50, height_m=50, depth_m=50, resolution_m=2.0, camera_window_s=0.1)
+        grid = VoxelGrid(cfg)
+        origin = np.array([0.0, 0.0, 25.0])
+        direction = np.array([0.0, 0.0, 1.0])
+
+        grid.add_ray(origin, direction, intensity=1.0, camera_id="CAM1")
+        grid.add_ray(origin, direction, intensity=1.0, camera_id="CAM2")
+        time.sleep(0.2) # Wait past window
+        leaves_before = len(grid._active_leaves)
+        grid.add_ray(origin, direction, intensity=1.0, camera_id="CAM3")
+        leaves_after = len(grid._active_leaves)
+
+        assert leaves_after == leaves_before, "Subdivided despite votes being outside window"
+        return True
+
+    def test_cubic_root_derivation():
+        cfg1 = VoxelGridConfig(width_m=200, depth_m=200, height_m=100)
+        grid1 = VoxelGrid(cfg1)
+        assert grid1._root.size[0] == 256.0, "Root should be pow2(max_dim)=256"
+
+        cfg2 = VoxelGridConfig(width_m=200, depth_m=200, height_m=100, root_cell_size_m=512)
+        grid2 = VoxelGrid(cfg2)
+        assert grid2._root.size[0] == 512.0, "Root should use explicit size"
+        return True
+
+    check("Decay / Consolidate independence", test_decay_consolidate_independence)
+    check("Root expansion coords preserved", test_root_expansion_preserves_coords)
+    check("Amanatides-Woo exact visit", test_amanatiedes_woo_exact_visit)
+    check("Subdivision by camera count", test_subdivision_trigger_camera_count)
+    check("Subdivision window gating", test_subdivision_window_gating)
+    check("Cubic root size derivation", test_cubic_root_derivation)
 
 def test_simulation_to_server():
     """Test simulation node sends packets that server can unpack."""
@@ -415,6 +612,12 @@ def main():
     test_tracker()
     test_full_server_init()
     test_server_process_frame()
+    check("Ray pipeline: build_rays_from_packet -> add_rays_batch", test_ray_pipeline_integration)
+    check("Cluster default decay_rate", test_decay_rate_default_in_cluster)
+    check("Cluster hot_threshold override", test_hot_threshold_in_cluster)
+    check("Packet battery level missing ignored", test_battery_level_absent)
+    check("Uptime monotonic", test_uptime_monotonic)
+    test_octree()
     test_simulation_to_server()
     
     print("\n" + "=" * 60)

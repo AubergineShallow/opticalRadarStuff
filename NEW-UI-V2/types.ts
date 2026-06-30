@@ -40,6 +40,13 @@ export enum TrackState {
     DELETED = 3,
 }
 
+export interface TrackDisplayProps {
+    speed_ms:   number;     // √(vE²+vN²+vU²)
+    heading_deg: number;    // atan2(vE, vN) normalised [0, 360)
+    lat:         number;    // ENU-derived approximation (not for geodetic targeting)
+    lon:         number;
+}
+
 export interface Track {
     track_id: number;
     state: TrackState;
@@ -51,6 +58,7 @@ export interface Track {
     hit_count: number;
     confidence: number;     // [0.0, 1.0]
     predicted_next: Vector3; // Position at t+dt
+    display?: TrackDisplayProps;
 }
 
 export enum NodeHealthStatus {
@@ -58,6 +66,13 @@ export enum NodeHealthStatus {
     DEGRADED = 1,
     FAILING = 2,
     OFFLINE = 3,
+}
+
+export interface SensorConfig {
+    azimuth_deg:   number;
+    elevation_deg: number;
+    hfov_deg:      number;
+    vfov_deg:      number;
 }
 
 export interface NodeHealth {
@@ -69,6 +84,9 @@ export interface NodeHealth {
     temp_c: number;        // Celsius
     ip_address: string;
     location: Vector3;     // ENU
+    sensor_config?: SensorConfig;  // optional - backend may not always send it
+    display_lat?: number;
+    display_lon?: number;
 }
 
 export interface SystemStatus {

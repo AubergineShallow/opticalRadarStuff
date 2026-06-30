@@ -113,7 +113,8 @@ class Tracker:
         track_ids = [track.track_id for track in active_tracks]
         
         # Get detection positions
-        measurements = [d.position for d in detections]
+        # handle case where detections are objects with .position vs raw np.ndarray
+        measurements = [d.position if hasattr(d, 'position') else d for d in detections]
         
         # Associate detections to tracks
         matches, unmatched_tracks, unmatched_dets = associate(
@@ -132,12 +133,16 @@ class Tracker:
             track_id = track_ids[track_idx]
             det = detections[det_idx]
             
+            pos = det.position if hasattr(det, 'position') else det
+            c_id = getattr(det, 'class_id', 0)
+            conf = getattr(det, 'confidence', 1.0)
+
             self._track_manager.update_track(
                 track_id,
-                det.position,
+                pos,
                 dt,
-                class_id=det.class_id,
-                confidence=det.confidence
+                class_id=c_id,
+                confidence=conf
             )
             updated_tracks.append(track_id)
         
@@ -155,10 +160,13 @@ class Tracker:
         # Create new tracks for unmatched detections
         for det_idx in unmatched_dets:
             det = detections[det_idx]
+            pos = det.position if hasattr(det, 'position') else det
+            c_id = getattr(det, 'class_id', 0)
+            conf = getattr(det, 'confidence', 1.0)
             track = self._track_manager.create_track(
-                det.position,
-                class_id=det.class_id,
-                confidence=det.confidence
+                pos,
+                class_id=c_id,
+                confidence=conf
             )
             new_tracks.append(track.track_id)
         
