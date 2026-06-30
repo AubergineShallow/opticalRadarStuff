@@ -11,9 +11,6 @@ interface SensorListProps {
 
 export function SensorList({ nodes, onSelectNode, selectedNodeId }: SensorListProps) {
     const [isMinimized, setIsMinimized] = useState(false);
-    // Note: The UI expects 'sensor_config' which is currently not in the NodeHealth type definition
-    // or sent by the backend. We are casting to any for now to facilitate the UI update.
-    // Ideally should update types.ts to include the optional sensor_config property.
     const nodeList = Object.values(nodes);
 
     return (
@@ -51,14 +48,8 @@ export function SensorList({ nodes, onSelectNode, selectedNodeId }: SensorListPr
                                     const isSelected = selectedNodeId === node.node_id;
                                     const [pE, pN, pU] = node.location || [0, 0, 0]; // Fallback if undefined
 
-                                    // Approximation of Lat/Lon from ENU (Copied from TargetList/constants logic)
-                                    const REF_LAT = UI_CONFIG.INITIAL_VIEW_STATE.latitude;
-                                    const REF_LON = UI_CONFIG.INITIAL_VIEW_STATE.longitude;
-                                    const lat = REF_LAT + (pN / 111111);
-                                    const lon = REF_LON + (pE / (111111 * Math.cos(REF_LAT * Math.PI / 180)));
-
-                                    // Cast node to any to access potential future props
-                                    const config = (node as any).sensor_config || {};
+                                    const { sensor_config, display_lat, display_lon } = node;
+                                    const config = sensor_config || {};
 
                                     return (
                                         <tr
@@ -74,8 +65,8 @@ export function SensorList({ nodes, onSelectNode, selectedNodeId }: SensorListPr
                                             </td>
                                             <td className="p-2 text-right text-gray-300">
                                                 <div className="flex flex-col text-[10px] leading-tight">
-                                                    <span>{lat.toFixed(4)}</span>
-                                                    <span>{lon.toFixed(4)}</span>
+                                                    <span>{display_lat?.toFixed(4) ?? '—'}</span>
+                                                    <span>{display_lon?.toFixed(4) ?? '—'}</span>
                                                     <span className="text-[9px] text-gray-500">ALT: {pU.toFixed(0)}m</span>
                                                 </div>
                                             </td>

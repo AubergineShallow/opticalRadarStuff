@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useMemo } from 'react';
 import DeckGL from '@deck.gl/react';
 import { useAppStore } from '../../store';
 import { UI_CONFIG } from '../../constants';
@@ -22,13 +22,17 @@ export default function VisualizationMap() {
 
     const [viewState, setViewState] = useState(UI_CONFIG.INITIAL_VIEW_STATE);
 
+    // Stabilise Object.values()
+    const nodesArr  = useMemo(() => Object.values(nodes),  [nodes]);
+    const tracksArr = useMemo(() => Object.values(tracks), [tracks]);
+
     // --- LAYERS ---
-    const layers = [
+    const layers = useMemo(() => [
         // Base Map (Offline Support)
         createBaseMapLayer(),
 
         createNodeLayer({
-            data: Object.values(nodes),
+            data: nodesArr,
             onSelectNode: selectNode
         }),
         createRayLayer({
@@ -40,21 +44,20 @@ export default function VisualizationMap() {
             visible: showVoxels
         }),
         ...createTrackLayers({
-            data: Object.values(tracks),
+            data: tracksArr,
             onSelectTrack: selectTrack,
             selectedTrackId: selectedTrackId
         })
-    ].filter(Boolean);
+    ].filter(Boolean), [nodesArr, tracksArr, rays, voxels, showRays, showVoxels, selectedTrackId, selectTrack, selectNode]);
 
     return (
         <div className="relative w-full h-full bg-black">
             <DeckGL
-                initialViewState={viewState}
+                viewState={viewState}
                 controller={true}
                 layers={layers}
                 onViewStateChange={(params: ViewStateChangeParameters) => {
-                    // @ts-ignore - ViewState handling can be loose in DeckGL types
-                    setViewState(params.viewState);
+                    setViewState(params.viewState as any);
                 }}
                 getTooltip={({ object }) => object && (
                     object.track_id ? `Track ${object.track_id}` :

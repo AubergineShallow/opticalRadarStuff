@@ -19,8 +19,8 @@ class Cluster:
         vg_config.height_m = vg_config_dict.get('height_m', 100.0)
         vg_config.depth_m = vg_config_dict.get('depth_m', 200.0)
         vg_config.resolution_m = vg_config_dict.get('resolution_m', 1.0)
-        vg_config.decay_rate = vg_config_dict.get('decay_rate', 0.1)
-        vg_config.detection_threshold = vg_config_dict.get('detection_threshold', 1.5)
+        vg_config.decay_rate = vg_config_dict.get('decay_rate', 0.95)
+        vg_config.hot_threshold = vg_config_dict.get('hot_threshold', 5.0)
         self.voxel_grid = VoxelGrid(vg_config)
 
         sim_config = getattr(config, 'simulation', {})
@@ -31,7 +31,7 @@ class Cluster:
         ref_alt = sim_config.get('origin_alt', 0.0)
         self.ray_builder = RayBuilder(ref_lat, ref_lon, ref_alt)
 
-        self.tracker = Tracker(config)
+        self.tracker = Tracker()
 
         # Nodes explicitly assigned to this cluster
         self.assigned_nodes: Set[str] = set()
@@ -107,7 +107,7 @@ class ClusterManager:
         # For a true implementation, we would raycast from every camera to every voxel
         # to check frustum intersection.
         # As a placeholder/simplified calculation for the current step:
-        voxel_vol = grid.config.resolution ** 3
+        voxel_vol = grid.config.resolution_m ** 3
 
         # Assume each camera covers ~1000 voxels, and intersection is roughly 20%
         # This will be replaced with true geometric projection later.

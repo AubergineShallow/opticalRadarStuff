@@ -47,23 +47,58 @@ export function useWebSocket(url: string, enabled: boolean = true) {
                 const message: WSMessage = JSON.parse(event.data);
 
                 switch (message.type) {
-                    case 'TRACK_UPDATE':
-                        setTracks(message.payload);
+                    case 'TRACK_UPDATE': {
+                        const REF_LAT = UI_CONFIG.INITIAL_VIEW_STATE.latitude;
+                        const REF_LON = UI_CONFIG.INITIAL_VIEW_STATE.longitude;
+                        const cosRefLat = Math.cos(REF_LAT * Math.PI / 180);
+
+                        const enrichedTracks = (message.payload as any[]).map(track => {
+                            const [vE, vN, vU] = track.velocity || [0,0,0];
+                            const [pE, pN]     = track.position || [0,0,0];
+                            let heading = Math.atan2(vE, vN) * (180 / Math.PI);
+                            if (heading < 0) heading += 360;
+                            return {
+                                ...track,
+                                display: {
+                                    speed_ms:    Math.sqrt(vE*vE + vN*vN + vU*vU),
+                                    heading_deg: heading,
+                                    lat:         REF_LAT + pN / 111111,
+                                    lon:         REF_LON + pE / (111111 * cosRefLat),
+                                }
+                            };
+                        });
+                        setTracks(enrichedTracks);
                         break;
+                    }
                     case 'VOXEL_UPDATE':
                         setVoxels(message.payload);
                         break;
                     case 'RAY_UPDATE':
                         setRays(message.payload);
                         break;
-                    case 'NODE_UPDATE':
+                    case 'NODE_UPDATE': {
                         // Payload is an array of NodeHealth, store expects individual updates
+                        const REF_LAT = UI_CONFIG.INITIAL_VIEW_STATE.latitude;
+                        const REF_LON = UI_CONFIG.INITIAL_VIEW_STATE.longitude;
+                        const cosRefLat = Math.cos(REF_LAT * Math.PI / 180);
+
+                        const processNode = (node: any) => {
+                            const [pE, pN] = node.location || [0, 0, 0];
+                            const enrichedNode = {
+                                ...node,
+                                display_lat: REF_LAT + pN / 111111,
+                                display_lon: REF_LON + pE / (111111 * cosRefLat),
+                            };
+                            updateNode(enrichedNode);
+                        };
+
                         if (Array.isArray(message.payload)) {
-                            message.payload.forEach((node: any) => updateNode(node));
+                            message.payload.forEach(processNode);
                         } else {
-                            updateNode(message.payload);
+                            processNode(message.payload);
                         }
                         break;
+                    }
                     case 'SYSTEM_STATUS':
                         updateSystemStatus(message.payload);
                         break;

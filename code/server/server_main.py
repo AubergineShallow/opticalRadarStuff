@@ -88,7 +88,7 @@ class OpticalRadarServer:
 
         # 3. Processing Core (Replaced Monolithic tracker with ClusterManager)
         self.cluster_manager = ClusterManager(self.config)
-        self.calibrator = Calibrator(self.config)
+        self.calibrator = Calibrator()
 
         # Legacy mappings for system_test compatibility
         self._default_cluster = self.cluster_manager.clusters['DEFAULT']
@@ -110,13 +110,12 @@ class OpticalRadarServer:
         self._setup_signal_handlers()
         
         # Performance tracking
-        self._frame_count = 0
         self.frame_count = 0
         self.last_fps_time = time.time()
         self._start_time = time.time()
         self._last_frame_time = time.time()
-        self._fps = 0.0
         self.current_fps = 0.0
+        self._last_consolidate = time.time()
 
     def _handle_create_cluster(self, client_id: str, payload: dict):
         """WebSocket handler for CREATE_CLUSTER command"""
@@ -274,7 +273,7 @@ class OpticalRadarServer:
             "cluster_id": cluster.cluster_id,
             "location": cam_pos,
             "status": "active",
-            "battery": packet.battery_level,
+            "battery": None,
             "last_seen": time.time()
         })
 
@@ -297,7 +296,12 @@ class OpticalRadarServer:
             for cluster_id, cluster in self.cluster_manager.get_all_clusters().items():
 
                 # Decay voxels
-                cluster.voxel_grid.decay()
+                cluster.voxel_grid.decay_active_leaves()
+
+                now = time.time()
+                if now - self._last_consolidate >= 1.5:
+                    cluster.voxel_grid.consolidate_and_prune()
+                    self._last_consolidate = now
 
                 # Extract detections (hot voxels)
                 detections = cluster.voxel_grid.get_detections()
@@ -340,10 +344,10 @@ class OpticalRadarServer:
         """Legacy helper for testing."""
         # Tick all active clusters
         for cluster_id, cluster in self.cluster_manager.get_all_clusters().items():
-            cluster.voxel_grid.decay()
+            cluster.voxel_grid.decay_active_leaves()
             detections = cluster.voxel_grid.get_detections()
             cluster.tracker.update(detections)
-        self._frame_count += 1
+        self.frame_count += 1
 
     def _broadcast_tracks(self, cluster_id: str, tracks: List['Track']):
         """Broadcast track data to UI clients subscribed to the specific cluster."""
@@ -382,7 +386,7 @@ class OpticalRadarServer:
             "fps": round(self.current_fps, 1),
             "cpu_usage": 0.0, # Placeholder
             "memory_usage": 0.0, # Placeholder
-            "uptime": int(time.time() - self.last_fps_time), # Roughly
+            "uptime": int(time.time() - self._start_time), # Roughly
             "clusters": clusters_info,
             "pending_nodes": list(self.cluster_manager.pending_nodes)
         }
