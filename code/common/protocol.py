@@ -1,3 +1,4 @@
+
 """
 protocol.py
 PURPOSE: Defines how cameras talk to the main computer (Version 3).

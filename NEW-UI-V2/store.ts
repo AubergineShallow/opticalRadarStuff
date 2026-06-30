@@ -1,5 +1,6 @@
+
 import { create } from 'zustand';
-import { Track, Ray, Voxel, NodeHealth, SystemStatus, TrackState } from './types';
+import { Track, Ray, Voxel, NodeHealth, SystemStatus, TrackState, ClusterInfo } from './types';
 
 interface AppState {
     // Data State
@@ -8,6 +9,11 @@ interface AppState {
     voxels: Voxel[]; // Sparse array of active voxels
     nodes: Record<string, NodeHealth>;
     system: SystemStatus;
+
+    // Cluster / domain state (P3.5)
+    clusters: Record<string, ClusterInfo>;
+    activeClusterId: string | null;
+    pendingNodeIds: string[];
 
     // UI State
     selectedTrackId: string | null;
@@ -23,6 +29,10 @@ interface AppState {
     setVoxels: (voxels: Voxel[]) => void;
     updateNode: (node: NodeHealth) => void;
     updateSystemStatus: (status: SystemStatus) => void;
+
+    setClusters: (clusters: Record<string, ClusterInfo>) => void;
+    setActiveCluster: (id: string | null) => void;
+    setPendingNodes: (ids: string[]) => void;
 
     selectTrack: (id: string | null) => void;
     selectNode: (id: string | null) => void;
@@ -46,6 +56,10 @@ export const useAppStore = create<AppState>((set) => ({
     voxels: [],
     nodes: {},
     system: DEFAULT_SYSTEM_STATUS,
+
+    clusters: {},
+    activeClusterId: null,
+    pendingNodeIds: [],
 
     selectedTrackId: null,
     selectedNodeId: null,
@@ -78,6 +92,17 @@ export const useAppStore = create<AppState>((set) => ({
 
     updateSystemStatus: (status) => set({ system: status }),
 
+    setClusters: (clusters) => set((state) => {
+        // Auto-select the first cluster as the active domain if none is chosen yet.
+        const ids = Object.keys(clusters);
+        const activeClusterId = state.activeClusterId ?? (ids.length > 0 ? ids[0] : null);
+        return { clusters, activeClusterId };
+    }),
+
+    setActiveCluster: (id) => set({ activeClusterId: id }),
+
+    setPendingNodes: (ids) => set({ pendingNodeIds: ids }),
+
     selectTrack: (id) => set({ selectedTrackId: id }),
 
     selectNode: (id) => set({ selectedNodeId: id }),
@@ -96,6 +121,9 @@ export const useAppStore = create<AppState>((set) => ({
         rays: [],
         voxels: [],
         nodes: {},
-        system: DEFAULT_SYSTEM_STATUS
+        system: DEFAULT_SYSTEM_STATUS,
+        clusters: {},
+        activeClusterId: null,
+        pendingNodeIds: []
     })
 }));

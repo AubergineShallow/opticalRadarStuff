@@ -1,3 +1,4 @@
+
 """
 config.py
 PURPOSE: Centralized configuration management for Server and Nodes.
@@ -59,6 +60,20 @@ class MonitoringConfig:
 
 
 @dataclass
+class CalibrationConfig:
+    """Self-calibration feedback loop (P1.5)."""
+    enabled: bool = True
+    buffer_size: int = 2000
+    solve_interval: float = 10.0        # seconds between solves
+    blend_factor: float = 0.1           # correction blend factor [0, 1]
+    max_correction_degrees: float = 15.0
+    min_observations: int = 100
+    min_track_hits: int = 3             # only feed confirmed tracks
+    association_radius_m: float = 10.0  # max ray-to-track distance to associate
+    offsets_file: str = "secrets/calibration_offsets.json"
+
+
+@dataclass
 class GPSConfig:
     port: str = "/dev/serial0"
     baud_rate: int = 9600
@@ -79,6 +94,7 @@ class Config:
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     grid: GridConfig = field(default_factory=GridConfig)
     monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
+    calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     gps: GPSConfig = field(default_factory=GPSConfig)
     imu: IMUConfig = field(default_factory=IMUConfig)
 
@@ -143,6 +159,8 @@ def load(path: Optional[str] = None) -> Config:
             config.grid = GridConfig(**data['grid'])
         if 'monitoring' in data:
             config.monitoring = MonitoringConfig(**data['monitoring'])
+        if 'calibration' in data:
+            config.calibration = CalibrationConfig(**data['calibration'])
         if 'gps' in data:
             config.gps = GPSConfig(**data['gps'])
         if 'imu' in data:

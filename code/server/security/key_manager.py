@@ -1,3 +1,4 @@
+
 """
 key_manager.py
 PURPOSE: Manage shared secrets for authentication across the system.
@@ -178,8 +179,22 @@ class KeyManager:
     def all_valid_keys(self) -> List[bytes]:
         """Get all non-expired keys."""
         now = time.time()
-        return [km.key for km in self._keys 
+        return [km.key for km in self._keys
                 if km.expires_at is None or km.expires_at > now]
+
+    def get_active_key(self, node_id: Optional[str] = None) -> Optional[bytes]:
+        """
+        Active (primary, non-expired) key for a node.
+
+        node_id is accepted for a future per-node key model; the current
+        implementation uses a single shared key for all nodes (P5.1).
+        """
+        return self.primary_key
+
+    def get_valid_keys(self, node_id: Optional[str] = None) -> List[bytes]:
+        """All keys valid for verification right now (covers the rotation grace
+        window). node_id is accepted for the future per-node model (P5.1)."""
+        return self.all_valid_keys
     
     def generate_key(self, length: int = 32) -> bytes:
         """

@@ -1,5 +1,7 @@
+
 import React, { useState } from 'react';
 import { ClusterInfo } from '../../types';
+import { useAppStore } from '../../store';
 
 interface TopBarProps {
     time: string;
@@ -11,6 +13,7 @@ interface TopBarProps {
 export function TopBar({ time, clusters = {}, activeClusterId, sendCommand }: TopBarProps) {
     const [newClusterName, setNewClusterName] = useState('');
     const [isCreating, setIsCreating] = useState(false);
+    const setActiveCluster = useAppStore(s => s.setActiveCluster);
 
     const handleCreateCluster = () => {
         if (newClusterName.trim() && sendCommand) {
@@ -37,9 +40,9 @@ export function TopBar({ time, clusters = {}, activeClusterId, sendCommand }: To
                         className="bg-black/80 text-green-400 border border-green-500/50 rounded px-3 py-1 font-mono text-sm outline-none focus:border-green-400"
                         value={activeClusterId || ''}
                         onChange={(e) => {
-                            if (e.target.value) {
-                                sendCommand?.('SUBSCRIBE_CLUSTER', { cluster_id: e.target.value });
-                            }
+                            // Update the active domain; the WebSocket hook subscribes
+                            // to the matching room when activeClusterId changes (P3.5).
+                            setActiveCluster(e.target.value || null);
                         }}
                     >
                         <option value="" disabled>Select Domain</option>
