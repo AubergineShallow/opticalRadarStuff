@@ -7,8 +7,9 @@ PURPOSE: Stores fixed settings for the system.
 SERVER_IP = "0.0.0.0"
 UDP_PORT = 5005
 
-# Message Size Limit
-MAX_PACKET_SIZE = 512
+# Message Size Limit (full UDP datagram ceiling). 512 silently truncated dense
+# telemetry packets in recvfrom() and the unpacker dropped the lost vectors.
+MAX_PACKET_SIZE = 65535
 
 # Version Number (Protocol V3)
 VERSION = 3
