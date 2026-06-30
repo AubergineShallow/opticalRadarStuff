@@ -199,6 +199,21 @@ class MetricsCollector:
         
         return '\n'.join(lines)
     
+    def snapshot(self) -> Dict[str, float]:
+        """
+        Return a plain {metric_key: value} dict of all current gauges/counters
+        plus histogram means — suitable for folding into a status broadcast (P5.2).
+        """
+        out: Dict[str, float] = {}
+        with self._lock:
+            for key, metric in self._metrics.items():
+                out[key] = metric.value
+            for key, values in self._histograms.items():
+                if values:
+                    name = key.split('{')[0]
+                    out[f"{name}_mean"] = sum(values) / len(values)
+        return out
+
     def reset(self) -> None:
         """Clear all metrics."""
         with self._lock:

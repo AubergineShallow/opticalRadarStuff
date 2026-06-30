@@ -138,8 +138,8 @@ class AnnouncePacket:
 class TelemetryPacket:
     """
     V3 Telemetry Packet from camera.
-    Header: 60 bytes
-    Body: N * 6 bytes (motion vectors)
+    Header: 61 bytes (HEADER_SIZE)
+    Body: N * 8 bytes (motion vectors, MOTION_VECTOR_SIZE)
     Signature: 32 bytes (optional, if security enabled)
     """
     # Header fields
@@ -161,7 +161,7 @@ class TelemetryPacket:
     signature: Optional[bytes] = None
     
     def pack_header(self) -> bytes:
-        """Pack 60-byte header."""
+        """Pack the 61-byte header (HEADER_SIZE)."""
         # Camera ID: 8 bytes (null-padded)
         cam_id_bytes = self.camera_id.encode('utf-8')[:8].ljust(8, b'\x00')
         
@@ -259,12 +259,16 @@ class TelemetryPacket:
             vectors.append(vec)
             offset += MOTION_VECTOR_SIZE
         
-        # Extract signature if present
+        # Auto-detect a trailing 32-byte HMAC signature: any bytes beyond
+        # header + vectors are the signature. The wire format carries no
+        # has_signature flag, so the UDP receive path could not otherwise tell
+        # a signed packet from an unsigned one and silently discarded the
+        # signature, making object-level verification always fail. (has_signature
+        # is kept for backwards compatibility but is no longer required.)
         signature = None
-        if has_signature:
-            remaining = len(data) - offset
-            if remaining >= SIGNATURE_SIZE:
-                signature = data[-SIGNATURE_SIZE:]
+        remaining = len(data) - offset
+        if remaining >= SIGNATURE_SIZE:
+            signature = data[-SIGNATURE_SIZE:]
         
         return cls(
             version=version,

@@ -182,11 +182,14 @@ class TrackManager:
         track = self._tracks.get(track_id)
         if not track or track.state == TrackState.DELETED:
             return None
-        
-        # Kalman predict + update
-        predicted = self._kalman.predict(track.kalman_state, dt)
-        updated, _ = self._kalman.update(predicted, measurement)
-        
+
+        # The caller (Tracker.update) already advanced this track to the current
+        # frame via predict_all_active(dt), and used that predicted position for
+        # association. Fuse the measurement into that predicted state directly.
+        # Predicting again here would advance the track by 2*dt and add process
+        # noise twice, biasing the estimate forward and inflating covariance.
+        updated, _ = self._kalman.update(track.kalman_state, measurement)
+
         track.kalman_state = updated
         track.hits += 1
         track.misses = 0

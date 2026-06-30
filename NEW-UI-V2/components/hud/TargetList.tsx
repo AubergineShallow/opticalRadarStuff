@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { Target, AlertCircle, ChevronUp, ChevronDown } from 'lucide-react';
 import { Track } from '../../types';
-import { UI_CONFIG } from '../../constants';
 
 interface TargetListProps {
     tracks: Record<string, Track>;
@@ -58,21 +57,11 @@ export function TargetList({ tracks, onSelectTrack, selectedTrackId }: TargetLis
                                 ) : (
                                     trackList.map(track => {
                                         const isSelected = selectedTrackId === track.track_id.toString();
-                                        const [vE, vN, vU] = track.velocity;
-                                        const [pE, pN, pU] = track.position;
+                                        const pU = track.position[2];
 
-                                        // Calculate Speed
-                                        const speed = Math.sqrt(vE ** 2 + vN ** 2 + vU ** 2);
-
-                                        // Calculate Heading (Azimuth)
-                                        let heading = Math.atan2(vE, vN) * (180 / Math.PI);
-                                        if (heading < 0) heading += 360;
-
-                                        // Approximation of Lat/Lon from ENU for display hints only
-                                        const REF_LAT = UI_CONFIG.INITIAL_VIEW_STATE.latitude;
-                                        const REF_LON = UI_CONFIG.INITIAL_VIEW_STATE.longitude;
-                                        const lat = REF_LAT + (pN / 111111);
-                                        const lon = REF_LON + (pE / (111111 * Math.cos(REF_LAT * Math.PI / 180)));
+                                        // Speed / heading / approx lat-lon are precomputed once
+                                        // at WebSocket receipt (P3.2) — no math in render.
+                                        const display = track.display;
 
                                         return (
                                             <tr
@@ -87,14 +76,14 @@ export function TargetList({ tracks, onSelectTrack, selectedTrackId }: TargetLis
                                                     T-{track.track_id}
                                                 </td>
                                                 <td className="p-2 text-right text-cyan-300">
-                                                    {speed.toFixed(1)} <span className="text-gray-600 text-[9px]">m/s</span>
+                                                    {display?.speed_ms.toFixed(1) ?? '—'} <span className="text-gray-600 text-[9px]">m/s</span>
                                                 </td>
                                                 <td className="p-2 text-right text-white">
-                                                    {heading.toFixed(0)}°
+                                                    {display?.heading_deg.toFixed(0) ?? '—'}°
                                                 </td>
                                                 <td className="p-2 text-right text-gray-300">
                                                     <div className="flex flex-col text-[10px] leading-tight opacity-90">
-                                                        <span title="Approximate Lat/Lon">{lat.toFixed(4)}, {lon.toFixed(4)}*</span>
+                                                        <span title="Approximate Lat/Lon">{display?.lat.toFixed(4) ?? '—'}, {display?.lon.toFixed(4) ?? '—'}*</span>
                                                         <span className="text-[9px] text-gray-500">ALT: {pU.toFixed(0)}m</span>
                                                     </div>
                                                 </td>
