@@ -1,0 +1,113 @@
+@prefix rdf: <http://www.w3.org/1999/02/22-rdf-syntax-ns#> .
+@prefix rdfs: <http://www.w3.org/2000/01/rdf-schema#> .
+@prefix owl: <http://www.w3.org/2002/07/owl#> .
+@prefix xsd: <http://www.w3.org/2001/XMLSchema#> .
+@prefix sosa: <http://www.w3.org/ns/sosa/> .
+@prefix ssn: <http://www.w3.org/ns/ssn/> .
+@prefix dopt: <http://www.tracking-network.org/ontology/dopt#> .
+
+# -------------------------------------------------------------
+# Core DOPT Ontology Extensions
+# -------------------------------------------------------------
+
+dopt:OpticalTrackingNode rdf:type owl:Class ;
+    rdfs:subClassOf sosa:Platform ;
+    rdfs:label "Optical Passive Tracking Node" ;
+    rdfs:comment "A distributed physical platform hosting optical and inertial sensors for target tracking." .
+
+dopt:IntegratedPlatform rdf:type owl:Class ;
+    rdfs:subClassOf dopt:OpticalTrackingNode ;
+    rdfs:label "Integrated Device Platform" ;
+    rdfs:comment "A smartphone or integrated consumer device with factory-calibrated, OS-managed sensors." .
+
+dopt:ModularPlatform rdf:type owl:Class ;
+    rdfs:subClassOf dopt:OpticalTrackingNode ;
+    rdfs:label "Modular Single-Board Computer Platform" ;
+    rdfs:comment "A modular SBC, such as a Raspberry Pi, hosting external, manually calibrated peripheral sensors." .
+
+dopt:CoordinateSystemReference rdf:type owl:Class ;
+    rdfs:label "Coordinate System Reference Frame" ;
+    rdfs:comment "Defines the reference frame alignment conventions used by a sensor or platform." .
+
+dopt:hasCoordinateReference rdf:type owl:ObjectProperty ;
+    rdfs:domain sosa:Sensor ;
+    rdfs:range dopt:CoordinateSystemReference ;
+    rdfs:label "has coordinate reference" .
+
+# -------------------------------------------------------------
+# Concrete Individuals: Integrated Smartphone Platform Instance
+# -------------------------------------------------------------
+
+dopt:PhoneNode_101 rdf:type dopt:IntegratedPlatform ;
+    rdfs:label "Smartphone Tracking Node 101" ;
+    sosa:hosts dopt:PhoneCamera_101 , dopt:PhoneIMU_101 , dopt:PhoneGPS_101 .
+
+dopt:PhoneCamera_101 rdf:type sosa:Sensor ;
+    rdfs:label "Integrated Back-Facing Smartphone Camera" ;
+    sosa:observes dopt:OpticalTargetBearing ;
+    dopt:hasCoordinateReference dopt:AndroidSensorCoordinateSystem ;
+    dopt:hasCalibrationOffset "90.0"^^xsd:double . # SENSOR_ORIENTATION in degrees
+
+dopt:PhoneIMU_101 rdf:type sosa:Sensor ;
+    rdfs:label "OS-Fused Virtual Rotation Vector Sensor" ;
+    sosa:observes dopt:PlatformAttitude ;
+    dopt:hasCoordinateReference dopt:AndroidSensorCoordinateSystem ;
+    sosa:usedProcedure dopt:AndroidSensorFusionAlgorithm .
+
+dopt:PhoneGPS_101 rdf:type sosa:Sensor ;
+    rdfs:label "Integrated GNSS Receiver" ;
+    sosa:observes dopt:GeodeticCoordinates .
+
+# -------------------------------------------------------------
+# Concrete Individuals: Modular Raspberry Pi Platform Instance
+# -------------------------------------------------------------
+
+dopt:RPiNode_202 rdf:type dopt:ModularPlatform ;
+    rdfs:label "Raspberry Pi Tracking Node 202" ;
+    sosa:hosts dopt:PiCam_202 , dopt:MPU6050_202 , dopt:ExternalGPS_202 .
+
+dopt:PiCam_202 rdf:type sosa:Sensor ;
+    rdfs:label "Modular MIPI CSI Camera Module" ;
+    sosa:observes dopt:OpticalTargetBearing ;
+    dopt:hasCoordinateReference dopt:LensOpticalCoordinateSystem .
+
+dopt:MPU6050_202 rdf:type sosa:Sensor ;
+    rdfs:label "Discrete MPU6050 6-DoF I2C MEMS IMU" ;
+    sosa:observes dopt:RawAngularVelocityAndLinearAcceleration ;
+    dopt:hasCoordinateReference dopt:MPU6050ChipPhysicalLayout ;
+    sosa:usedProcedure dopt:MadgwickFilterPipeline .
+
+dopt:ExternalGPS_202 rdf:type sosa:Sensor ;
+    rdfs:label "External UART NMEA GPS Receiver" ;
+    sosa:observes dopt:GeodeticCoordinates .
+
+# -------------------------------------------------------------
+# Metadata and Properties Definitions
+# -------------------------------------------------------------
+
+dopt:OpticalTargetBearing rdf:type sosa:ObservableProperty ;
+    rdfs:label "Optical Target Bearing (Azimuth and Elevation)" .
+
+dopt:PlatformAttitude rdf:type sosa:ObservableProperty ;
+    rdfs:label "3D Rotation Quaternion relative to Earth frame" .
+
+dopt:RawAngularVelocityAndLinearAcceleration rdf:type sosa:ObservableProperty ;
+    rdfs:label "Raw physical sensor axes outputs" .
+
+dopt:GeodeticCoordinates rdf:type sosa:ObservableProperty ;
+    rdfs:label "WGS-84 Geodetic Coordinate Point" .
+
+dopt:AndroidSensorCoordinateSystem rdf:type dopt:CoordinateSystemReference ;
+    rdfs:label "Android Screen-Relative Coordinate System" .
+
+dopt:LensOpticalCoordinateSystem rdf:type dopt:CoordinateSystemReference ;
+    rdfs:label "Standard Lens-Relative Optical Coordinate System" .
+
+dopt:MPU6050ChipPhysicalLayout rdf:type dopt:CoordinateSystemReference ;
+    rdfs:label "MPU6050 Breakout Board Physical Cartesian Layout" .
+
+dopt:AndroidSensorFusionAlgorithm rdf:type sosa:Procedure ;
+    rdfs:label "On-Chip proprietary Kalman-filtered sensor fusion" .
+
+dopt:MadgwickFilterPipeline rdf:type sosa:Procedure ;
+    rdfs:label "Software complementary Madgwick attitude filter" .
