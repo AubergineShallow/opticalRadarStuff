@@ -1,3 +1,4 @@
+
 """
 Native module wrapper with Python fallback.
 
@@ -47,8 +48,13 @@ def add_ray_to_grid(
         grid_origin = np.zeros(3)
     
     if NATIVE_AVAILABLE:
+        # BUG-003: the native kernel writes heat IN PLACE. `.astype()` always
+        # copies, so the native writes would land in a throwaway copy and the
+        # caller's grid would never change. `np.asarray(..., dtype=float32)` is
+        # a no-op (returns the same object) when grid is already float32, which
+        # it always is here, preserving the in-place contract.
         return _native.add_ray_to_grid(
-            grid.astype(np.float32),
+            np.asarray(grid, dtype=np.float32),
             float(origin[0]), float(origin[1]), float(origin[2]),
             float(direction[0]), float(direction[1]), float(direction[2]),
             float(intensity),
@@ -109,8 +115,10 @@ def add_rays_batch(
         grid_origin = np.zeros(3)
     
     if NATIVE_AVAILABLE:
+        # BUG-003: grid is written in place — must not be copied (see add_ray_to_grid).
+        # origins/directions/intensities are read-only inputs, so copying those is fine.
         return _native.add_rays_batch(
-            grid.astype(np.float32),
+            np.asarray(grid, dtype=np.float32),
             origins.astype(np.float32),
             directions.astype(np.float32),
             intensities.astype(np.float32),
@@ -137,7 +145,8 @@ def decay_grid(grid: np.ndarray, decay_rate: float) -> None:
         decay_rate: Decay factor (e.g., 0.95)
     """
     if NATIVE_AVAILABLE:
-        _native.decay_grid(grid.astype(np.float32), float(decay_rate))
+        # BUG-003: decay scales the grid in place — pass the real array, not a copy.
+        _native.decay_grid(np.asarray(grid, dtype=np.float32), float(decay_rate))
     else:
         grid *= decay_rate
 

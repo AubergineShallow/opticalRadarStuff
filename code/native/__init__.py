@@ -1,3 +1,4 @@
+
 """Native C++ module for high-performance voxel operations."""
 
 from .native_wrapper import (

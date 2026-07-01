@@ -1,0 +1,25 @@
+
+{
+    "_comment": "Per-node optical spec registry. A node's angular uncertainty is a fixed physical property of its lens+sensor (field of view / resolution) that embedded modules (Pi Camera, ESP32-CAM) cannot read back electronically, so it must be provisioned here rather than reflashed into firmware. Each node loads its own entry by node id at startup to populate its AnnouncePacket; the server loads the whole file as a fallback optics source for nodes that have not announced yet. Edit an entry (or add a new node id) to correct a node's optics with no code change. Fields: sensor (human label), fov_horizontal/fov_vertical in degrees, resolution_width/resolution_height in pixels. The special '_default' entry is used for any node id not listed.",
+    "_default": {
+        "sensor": "generic 60x45 camera",
+        "fov_horizontal": 60.0,
+        "fov_vertical": 45.0,
+        "resolution_width": 640,
+        "resolution_height": 480
+    },
+    "cam01": {
+        "sensor": "Raspberry Pi Camera v2 (IMX219)",
+        "fov_horizontal": 62.2,
+        "fov_vertical": 48.8,
+        "resolution_width": 640,
+        "resolution_height": 480
+    },
+    "esp01": {
+        "sensor": "ESP32-CAM (OV2640)",
+        "fov_horizontal": 66.0,
+        "fov_vertical": 50.0,
+        "resolution_width": 800,
+        "resolution_height": 600
+    }
+}

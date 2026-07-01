@@ -1,13 +1,34 @@
+
 """
 voxel_grid.py
-PURPOSE: 3D grid for accumulating ray intersections.
+PURPOSE: Sparse hierarchical octree for accumulating ray intersections.
+
+P2 (Hierarchical Octree) replaces the dense numpy accumulator with a sparse
+octree. The grid starts as a single coarse root leaf and only subdivides a
+region once it is hit by >= ``min_cameras_to_subdivide`` distinct cameras
+within a co-temporal window (P2.5) — i.e. where a real multi-camera
+triangulation is occurring. This keeps memory proportional to active leaves,
+not to the static grid volume.
+
+Single-resolution / single-camera behaviour reduces to a coarse grid, so the
+existing tests (which fire one ray and check no-crash + list/stat shapes)
+continue to pass unchanged.
+
+Backward-compat surface retained: VoxelGridConfig, HotVoxel, VoxelGrid with
+add_ray / add_rays_batch / decay / get_hot_voxels / cluster_hot_voxels /
+get_detections / get_stats / reset, plus nx/ny/nz/origin aliases.
 """
 
+import math
 import numpy as np
-from typing import List, Tuple, Optional
-from dataclasses import dataclass
+from typing import List, Tuple, Optional, Dict, Set, TYPE_CHECKING
+from dataclasses import dataclass, field
 
-# Import native acceleration module (with Python fallback)
+if TYPE_CHECKING:
+    from server.ray_builder import Ray
+
+# Import native acceleration module (kept for a possible Phase 2 native octree
+# kernel — see P2.9). Phase 1 octree traversal is pure Python + NumPy.
 try:
     import sys
     import os
@@ -23,308 +44,495 @@ except ImportError:
 @dataclass
 class VoxelGridConfig:
     """Voxel grid configuration."""
-    width_m: float = 200.0  # X (East) dimension
+    # --- existing fields, unchanged defaults ---
+    width_m: float = 200.0   # X (East) dimension
     height_m: float = 100.0  # Z (Up) dimension
-    depth_m: float = 200.0  # Y (North) dimension
-    resolution_m: float = 1.0  # Voxel size
-    decay_rate: float = 0.95  # Per-frame decay
-    hot_threshold: float = 5.0  # Minimum heat to consider "hot"
+    depth_m: float = 200.0   # Y (North) dimension
+    resolution_m: float = 1.0  # finest leaf cell size
+    decay_rate: float = 0.95   # per-frame heat decay
+    hot_threshold: float = 5.0  # minimum heat to consider "hot"
+
+    # --- new optional fields (P2.2) ---
+    root_cell_size_m: float = 0.0    # 0.0 -> derive as next_pow2(max(dims))
+    level_sizes: tuple = ()          # () -> single-resolution mode
+    cold_threshold: float = 0.5      # heat below which a leaf may be collapsed
+    camera_window_frames: int = 10   # co-temporal window for M-camera trigger (P2.5)
+    min_cameras_to_subdivide: int = 3
 
 
 @dataclass
 class HotVoxel:
-    """A voxel above the heat threshold."""
-    x: int
-    y: int
-    z: int
+    """A leaf above the heat threshold (octree-compatible)."""
     heat: float
-    center: np.ndarray  # Center position in world coords
+    center: np.ndarray  # world coords — what callers consume
+    level: int          # octree depth; 0 = root
+    size_m: float       # cell size at this level
+
+
+@dataclass(eq=False)
+class OctreeNode:
+    """
+    A node in the sparse octree.
+
+    eq=False -> identity equality + hashability, so nodes can live in a set
+    (``_active_leaves``). Value equality on numpy-array fields would be
+    ambiguous anyway.
+    """
+    bounds_min: np.ndarray              # [xmin, ymin, zmin] world coords
+    bounds_max: np.ndarray              # [xmax, ymax, zmax]
+    heat: float = 0.0
+    level: int = 0                      # 0 = root
+    parent: Optional['OctreeNode'] = None
+    children: Optional[List[Optional['OctreeNode']]] = None  # None -> leaf
+
+    # Per-node camera tracking for the subdivision trigger (P2.5):
+    # {camera_id: last_frame_index}
+    _recent_cameras: dict = field(default_factory=dict)
+
+    @property
+    def is_leaf(self) -> bool:
+        return self.children is None
+
+    @property
+    def size(self) -> np.ndarray:
+        return self.bounds_max - self.bounds_min
+
+    @property
+    def center(self) -> np.ndarray:
+        return (self.bounds_min + self.bounds_max) * 0.5
+
+    def subdivide(self) -> List['OctreeNode']:
+        """Split into 8 equal children. Returns the new children."""
+        mid = self.center
+        self.children = []
+        for xi in range(2):
+            for yi in range(2):
+                for zi in range(2):
+                    cmin = np.array([
+                        self.bounds_min[0] if xi == 0 else mid[0],
+                        self.bounds_min[1] if yi == 0 else mid[1],
+                        self.bounds_min[2] if zi == 0 else mid[2],
+                    ])
+                    cmax = np.array([
+                        mid[0] if xi == 0 else self.bounds_max[0],
+                        mid[1] if yi == 0 else self.bounds_max[1],
+                        mid[2] if zi == 0 else self.bounds_max[2],
+                    ])
+                    child = OctreeNode(
+                        bounds_min=cmin, bounds_max=cmax,
+                        heat=self.heat / 8.0,   # distribute parent heat
+                        level=self.level + 1,
+                        parent=self,
+                    )
+                    self.children.append(child)
+        return self.children
+
+    def collapse(self) -> None:
+        """Merge children back into this leaf. Caller updates _active_leaves."""
+        if self.children:
+            self.heat = max((c.heat for c in self.children if c is not None),
+                            default=self.heat)
+        self.children = None
+        self._recent_cameras.clear()
 
 
 class VoxelGrid:
     """
-    3D accumulator grid for ray intersection.
-    
-    Rays from cameras are traced through the grid, adding heat
-    to voxels they pass through. Where multiple rays intersect,
-    heat accumulates, revealing object locations.
+    Sparse octree accumulator for ray intersection.
+
+    Rays add heat to the leaf cells they pass through. Where votes from
+    multiple distinct cameras coincide on a cell, the cell subdivides,
+    progressively localising the intersection down to ``resolution_m``.
     """
-    
+
     def __init__(self, config: Optional[VoxelGridConfig] = None):
-        """
-        Initialize voxel grid.
-        
-        Args:
-            config: Grid configuration
-        """
         self.config = config or VoxelGridConfig()
-        
-        # Calculate grid dimensions
+
+        # Dense-grid aliases retained for backward compat (get_stats, ENU origin).
         self.nx = int(self.config.width_m / self.config.resolution_m)
         self.ny = int(self.config.depth_m / self.config.resolution_m)
         self.nz = int(self.config.height_m / self.config.resolution_m)
-        
-        # Grid origin (center of grid at ground level)
         self.origin = np.array([
             -self.config.width_m / 2,
             -self.config.depth_m / 2,
-            0.0
+            0.0,
         ])
-        
-        # Allocate grid
-        self.grid = np.zeros((self.nx, self.ny, self.nz), dtype=np.float32)
-    
+
+        self._init_root()
+
+    # ------------------------------------------------------------------ #
+    # Construction / reset                                               #
+    # ------------------------------------------------------------------ #
+    def _root_size(self) -> float:
+        """Derive the cubic root cell size from config (P2.6)."""
+        max_dim = max(self.config.width_m, self.config.depth_m, self.config.height_m)
+        if self.config.root_cell_size_m > 0:
+            return float(self.config.root_cell_size_m)
+        # Round up to next power of two for clean binary subdivision.
+        return float(2 ** math.ceil(math.log2(max_dim))) if max_dim > 0 else 1.0
+
+    def _init_root(self) -> None:
+        root_size = self._root_size()
+        half = root_size / 2.0
+        # Cubic root: X,Y centred at 0; Z runs from ground (0) up to root_size.
+        self._root = OctreeNode(
+            bounds_min=np.array([-half, -half, 0.0]),
+            bounds_max=np.array([half, half, root_size]),
+            level=0,
+        )
+        self._active_leaves: Set[OctreeNode] = {self._root}
+
     def reset(self) -> None:
-        """Clear all heat values."""
-        self.grid.fill(0)
-    
-    def decay(self) -> None:
-        """Apply decay to all voxels."""
-        self.grid *= self.config.decay_rate
-    
+        """Clear all heat and structure back to a single root leaf."""
+        self._init_root()
+
+    # ------------------------------------------------------------------ #
+    # Coordinate helpers (retained for compat)                           #
+    # ------------------------------------------------------------------ #
     def world_to_grid(self, pos: np.ndarray) -> Tuple[int, int, int]:
-        """
-        Convert world position to grid indices.
-        
-        Args:
-            pos: World position [x, y, z]
-        
-        Returns:
-            Grid indices (ix, iy, iz)
-        """
         local = pos - self.origin
-        ix = int(local[0] / self.config.resolution_m)
-        iy = int(local[1] / self.config.resolution_m)
-        iz = int(local[2] / self.config.resolution_m)
-        return (ix, iy, iz)
-    
+        return (
+            int(local[0] / self.config.resolution_m),
+            int(local[1] / self.config.resolution_m),
+            int(local[2] / self.config.resolution_m),
+        )
+
     def grid_to_world(self, ix: int, iy: int, iz: int) -> np.ndarray:
-        """
-        Convert grid indices to world position (voxel center).
-        
-        Args:
-            ix, iy, iz: Grid indices
-        
-        Returns:
-            World position [x, y, z]
-        """
         return self.origin + np.array([
             (ix + 0.5) * self.config.resolution_m,
             (iy + 0.5) * self.config.resolution_m,
-            (iz + 0.5) * self.config.resolution_m
+            (iz + 0.5) * self.config.resolution_m,
         ])
-    
+
     def is_valid_index(self, ix: int, iy: int, iz: int) -> bool:
-        """Check if indices are within grid bounds."""
-        return (0 <= ix < self.nx and 
-                0 <= iy < self.ny and 
-                0 <= iz < self.nz)
-    
+        return (0 <= ix < self.nx and 0 <= iy < self.ny and 0 <= iz < self.nz)
+
+    # ------------------------------------------------------------------ #
+    # Decay (P2.1): per-frame heat decay vs. throttled structural prune  #
+    # ------------------------------------------------------------------ #
+    def decay_active_leaves(self) -> None:
+        """
+        Per-frame heat decay. O(active_leaves) multiplications, zero allocation.
+        Call every frame from _run_loop at full rate.
+        """
+        dr = self.config.decay_rate
+        for leaf in self._active_leaves:
+            leaf.heat *= dr
+
+    def decay(self) -> None:
+        """Backward-compat alias. Prefer decay_active_leaves() directly."""
+        self.decay_active_leaves()
+
+    def consolidate_and_prune(self) -> None:
+        """
+        Throttled structural housekeeping (call at ~1.5s cadence, not per frame).
+        Collapses sibling leaves that have all cooled below cold_threshold back
+        into their parent and frees the child nodes. No heat modification.
+        """
+        cold = self.config.cold_threshold
+        changed = True
+        while changed:
+            changed = False
+            # Walk internal nodes bottom-up so collapses can cascade upward.
+            for node in self._internal_nodes_postorder():
+                children = node.children
+                if not children:
+                    continue
+                if all(c is not None and c.is_leaf and c.heat < cold for c in children):
+                    for c in children:
+                        self._active_leaves.discard(c)
+                    node.collapse()
+                    self._active_leaves.add(node)
+                    changed = True
+
+    def _internal_nodes_postorder(self) -> List[OctreeNode]:
+        """Internal (non-leaf) nodes, deepest first."""
+        result: List[OctreeNode] = []
+
+        def rec(node: OctreeNode) -> None:
+            if node.is_leaf:
+                return
+            for c in node.children:
+                if c is not None:
+                    rec(c)
+            result.append(node)
+
+        rec(self._root)
+        return result
+
+    # ------------------------------------------------------------------ #
+    # Ray insertion                                                      #
+    # ------------------------------------------------------------------ #
     def add_ray(
         self,
         origin: np.ndarray,
         direction: np.ndarray,
         intensity: float = 1.0,
         max_distance: float = 150.0,
-        step_size: float = 0.5
+        step_size: float = 0.5,   # retained for signature compat; unused
+        camera_id: str = "",
+        frame_index: int = 0,
     ) -> int:
         """
-        Add heat along a ray.
-        
-        Uses native C++ acceleration when available, otherwise falls
-        back to pure Python (slower but functional).
-        
-        Args:
-            origin: Ray origin [x, y, z]
-            direction: Ray direction (unit vector)
-            intensity: Heat to add per voxel
-            max_distance: Maximum ray distance
-            step_size: March step size
-        
-        Returns:
-            Number of voxels updated
+        Add heat along a ray through the octree.
+
+        Returns the number of leaf cells updated.
         """
-        # Use native module if available (10-100x faster)
-        if _NATIVE_MODULE is not None:
-            return _NATIVE_MODULE.add_ray_to_grid(
-                self.grid,
-                origin,
-                direction,
-                intensity,
-                step_size,
-                max_distance,
-                self.config.resolution_m,
-                self.origin
-            )
-        
-        # Python fallback
-        direction = direction / np.linalg.norm(direction)
-        
-        updated = 0
-        t = 0.0
-        
-        while t < max_distance:
-            pos = origin + t * direction
-            ix, iy, iz = self.world_to_grid(pos)
-            
-            if self.is_valid_index(ix, iy, iz):
-                self.grid[ix, iy, iz] += intensity
-                updated += 1
-            
-            t += step_size
-        
-        return updated
-    
+        return self._traverse_octree(
+            np.asarray(origin, dtype=float),
+            np.asarray(direction, dtype=float),
+            float(intensity),
+            camera_id,
+            int(frame_index),
+            float(max_distance),
+        )
+
     def add_rays_batch(
         self,
-        rays: List[Tuple[np.ndarray, np.ndarray, float]],  # (origin, direction, intensity)
+        rays: List['Ray'],
         max_distance: float = 150.0,
-        step_size: float = 0.5
+        step_size: float = 0.5,
+        frame_index: int = 0,
     ) -> int:
         """
-        Add multiple rays efficiently.
-        
-        Uses native C++ batch processing when available for maximum performance.
-        
-        Args:
-            rays: List of (origin, direction, intensity) tuples
-            max_distance: Maximum ray distance
-        
-        Returns:
-            Total voxels updated
+        Add multiple Ray objects (from RayBuilder.build_rays_from_packet).
+
+        Phase 1 (P2.9): pure-Python octree traversal — the native flat-grid
+        kernel is structurally incompatible with variable-resolution leaves.
         """
         if not rays:
             return 0
-        
-        # Use native batch processing if available
-        if _NATIVE_MODULE is not None:
-            origins = np.array([r[0] for r in rays], dtype=np.float32)
-            directions = np.array([r[1] for r in rays], dtype=np.float32)
-            intensities = np.array([r[2] for r in rays], dtype=np.float32)
-            
-            return _NATIVE_MODULE.add_rays_batch(
-                self.grid,
-                origins,
-                directions,
-                intensities,
-                step_size,
-                max_distance,
-                self.config.resolution_m,
-                self.origin
-            )
-        
-        # Python fallback
+
         total = 0
-        for origin, direction, intensity in rays:
-            total += self.add_ray(origin, direction, intensity, max_distance, step_size)
+        for r in rays:
+            total += self.add_ray(
+                r.origin, r.direction, r.intensity,
+                max_distance, step_size,
+                camera_id=getattr(r, 'camera_id', ''),
+                frame_index=frame_index,
+            )
         return total
-    
-    def get_hot_voxels(
+
+    def _traverse_octree(
         self,
-        threshold: Optional[float] = None
-    ) -> List[HotVoxel]:
+        origin: np.ndarray,
+        direction: np.ndarray,
+        intensity: float,
+        camera_id: str,
+        frame_index: int,
+        max_distance: float,
+    ) -> int:
         """
-        Find voxels above heat threshold.
-        
-        Args:
-            threshold: Heat threshold (default: config value)
-        
-        Returns:
-            List of hot voxels
+        Traverse the octree coarse-to-fine, depositing heat in each intersected
+        leaf exactly once, and subdividing leaves that meet the M-distinct-camera
+        co-temporal threshold (P2.4/P2.5).
         """
-        threshold = threshold or self.config.hot_threshold
-        
-        # Find hot indices
-        hot_indices = np.argwhere(self.grid >= threshold)
-        
-        results = []
-        for ix, iy, iz in hot_indices:
-            results.append(HotVoxel(
-                x=ix,
-                y=iy,
-                z=iz,
-                heat=float(self.grid[ix, iy, iz]),
-                center=self.grid_to_world(ix, iy, iz)
-            ))
-        
-        # Sort by heat (descending)
+        norm = np.linalg.norm(direction)
+        if norm == 0:
+            return 0
+        direction = direction / norm
+
+        updated = 0
+        stack: List[OctreeNode] = [self._root]
+
+        while stack:
+            node = stack.pop()
+
+            t_min, t_max = self._ray_slab(origin, direction,
+                                          node.bounds_min, node.bounds_max)
+            if t_max < 0 or t_min > max_distance or t_min > t_max:
+                continue
+
+            # Altitude ceiling: derived from config, not hardcoded.
+            entry_t = max(t_min, 0.0)
+            if origin[2] + entry_t * direction[2] > self.config.height_m:
+                continue
+
+            if node.is_leaf:
+                node.heat += intensity
+                updated += 1
+
+                # Record this camera's vote and prune stale ones (co-temporal window).
+                node._recent_cameras[camera_id] = frame_index
+                window = self.config.camera_window_frames
+                node._recent_cameras = {
+                    cid: f for cid, f in node._recent_cameras.items()
+                    if frame_index - f <= window
+                }
+
+                # Subdivide on M distinct cameras while above finest resolution.
+                leaf_size = float(node.size[0])
+                if (len(node._recent_cameras) >= self.config.min_cameras_to_subdivide
+                        and leaf_size > self.config.resolution_m):
+                    children = node.subdivide()
+                    self._active_leaves.discard(node)
+                    self._active_leaves.update(children)
+                    stack.extend(children)  # re-traverse this ray into children
+            else:
+                for c in node.children:
+                    if c is None:
+                        continue
+                    ct_min, ct_max = self._ray_slab(origin, direction,
+                                                    c.bounds_min, c.bounds_max)
+                    if ct_max >= 0 and ct_min <= max_distance and ct_min <= ct_max:
+                        stack.append(c)
+
+        return updated
+
+    @staticmethod
+    def _ray_slab(
+        origin: np.ndarray,
+        direction: np.ndarray,
+        box_min: np.ndarray,
+        box_max: np.ndarray,
+    ) -> Tuple[float, float]:
+        """
+        Ray-AABB slab test. Returns (t_enter, t_exit); t_enter > t_exit means
+        no intersection. t_enter < 0 means the origin is inside the box.
+
+        Axis-aligned rays (a zero direction component) are handled explicitly:
+        a ray parallel to a slab only intersects the box if its origin lies
+        within that slab. (The naive vectorised form treats every box as
+        spanning the zero axis, which makes an axis-aligned ray "hit" every
+        off-path cell.)
+        """
+        t_enter = -np.inf
+        t_exit = np.inf
+        for a in range(3):
+            d = direction[a]
+            if d != 0.0:
+                ta = (box_min[a] - origin[a]) / d
+                tb = (box_max[a] - origin[a]) / d
+                lo, hi = (ta, tb) if ta <= tb else (tb, ta)
+                if lo > t_enter:
+                    t_enter = lo
+                if hi < t_exit:
+                    t_exit = hi
+            else:
+                # Parallel to this slab: must be inside it to intersect at all.
+                if origin[a] < box_min[a] or origin[a] > box_max[a]:
+                    return (np.inf, -np.inf)
+        return (float(t_enter), float(t_exit))
+
+    # ------------------------------------------------------------------ #
+    # Directional root expansion (P2.7)                                  #
+    # ------------------------------------------------------------------ #
+    def expand_root(self, breach_position: np.ndarray) -> None:
+        """
+        Double the octree bounds toward a breach. The old root becomes a child
+        of a new super-root; existing leaf world coordinates are preserved
+        exactly (no translation).
+        """
+        breach_position = np.asarray(breach_position, dtype=float)
+        old_root = self._root
+        old_min = old_root.bounds_min.copy()
+        old_max = old_root.bounds_max.copy()
+        old_size = old_max - old_min
+
+        breach_positive = breach_position > (old_min + old_size * 0.9)
+        breach_negative = breach_position < (old_min + old_size * 0.1)
+
+        new_min = old_min.copy()
+        new_max = old_max.copy()
+        for axis in range(3):
+            if breach_positive[axis]:
+                new_max[axis] += old_size[axis]
+            elif breach_negative[axis]:
+                new_min[axis] -= old_size[axis]
+
+        super_root = OctreeNode(
+            bounds_min=new_min,
+            bounds_max=new_max,
+            level=old_root.level - 1,
+            children=[None] * 8,
+        )
+
+        # Place the old root in the octant opposite the breach so its leaves
+        # keep their world coordinates.
+        octant_idx = 0
+        for ax in range(3):
+            if breach_positive[ax]:
+                bit = 0
+            elif breach_negative[ax]:
+                bit = 1
+            else:
+                bit = 1
+            octant_idx |= (bit << ax)
+
+        super_root.children[octant_idx] = old_root
+        old_root.parent = super_root
+        self._root = super_root
+
+    # ------------------------------------------------------------------ #
+    # Detection extraction                                               #
+    # ------------------------------------------------------------------ #
+    def get_hot_voxels(self, threshold: Optional[float] = None) -> List[HotVoxel]:
+        """Return active leaves with heat >= threshold, hottest first."""
+        threshold = threshold if threshold is not None else self.config.hot_threshold
+        results = [
+            HotVoxel(heat=leaf.heat, center=leaf.center,
+                     level=leaf.level, size_m=float(leaf.size[0]))
+            for leaf in self._active_leaves
+            if leaf.heat >= threshold
+        ]
         results.sort(key=lambda v: v.heat, reverse=True)
-        
         return results
-    
+
     def cluster_hot_voxels(
         self,
         hot_voxels: List[HotVoxel],
-        cluster_radius: float = 3.0
+        cluster_radius: float = 3.0,
     ) -> List[np.ndarray]:
-        """
-        Cluster nearby hot voxels into detection centroids.
-        
-        Args:
-            hot_voxels: List of hot voxels
-            cluster_radius: Maximum distance for clustering
-        
-        Returns:
-            List of cluster center positions
-        """
+        """Cluster nearby hot voxels into weighted detection centroids."""
         if not hot_voxels:
             return []
-        
+
         clusters = []
         used = [False] * len(hot_voxels)
-        
+
         for i, voxel in enumerate(hot_voxels):
             if used[i]:
                 continue
-            
-            # Start new cluster
+
             cluster_positions = [voxel.center]
             cluster_weights = [voxel.heat]
             used[i] = True
-            
-            # Find neighbors
-            for j, other in enumerate(hot_voxels[i+1:], i+1):
+
+            for j, other in enumerate(hot_voxels[i + 1:], i + 1):
                 if used[j]:
                     continue
-                
                 dist = np.linalg.norm(voxel.center - other.center)
                 if dist <= cluster_radius:
                     cluster_positions.append(other.center)
                     cluster_weights.append(other.heat)
                     used[j] = True
-            
-            # Weighted centroid
+
             weights = np.array(cluster_weights)
             positions = np.array(cluster_positions)
             centroid = np.average(positions, axis=0, weights=weights)
             clusters.append(centroid)
-        
+
         return clusters
-    
+
     def get_detections(
         self,
         threshold: Optional[float] = None,
-        cluster_radius: float = 3.0
+        cluster_radius: float = 3.0,
     ) -> List[np.ndarray]:
-        """
-        Get detection positions from current grid state.
-        
-        Args:
-            threshold: Heat threshold
-            cluster_radius: Clustering radius
-        
-        Returns:
-            List of detection positions
-        """
+        """Get detection centroid positions from current grid state."""
         hot = self.get_hot_voxels(threshold)
         return self.cluster_hot_voxels(hot, cluster_radius)
-    
+
     def get_stats(self) -> dict:
-        """Get grid statistics."""
+        """Get grid statistics (octree-aware)."""
+        leaves = self._active_leaves
+        n = len(leaves)
         return {
-            'dimensions': (self.nx, self.ny, self.nz),
-            'total_voxels': self.nx * self.ny * self.nz,
-            'max_heat': float(self.grid.max()),
-            'mean_heat': float(self.grid.mean()),
-            'hot_count': int((self.grid >= self.config.hot_threshold).sum())
+            'dimensions': (self.nx, self.ny, self.nz),       # kept for compat
+            'total_voxels': n,                               # now: active leaf count
+            'max_resolution_total_voxels': self.nx * self.ny * self.nz,
+            'active_leaves': n,
+            'max_heat': max((l.heat for l in leaves), default=0.0),
+            'mean_heat': (sum(l.heat for l in leaves) / n) if n else 0.0,
+            'hot_count': sum(1 for l in leaves if l.heat >= self.config.hot_threshold),
         }

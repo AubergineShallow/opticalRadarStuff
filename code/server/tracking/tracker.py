@@ -1,3 +1,4 @@
+
 """
 tracker.py
 PURPOSE: Main tracking interface combining all components.
@@ -19,6 +20,11 @@ class Detection:
     confidence: float = 1.0
     class_id: int = 0
     timestamp: float = 0.0
+    # Optional 3x3 positional measurement covariance derived from the optics of
+    # the nodes that triangulated this detection (see server.uncertainty). When
+    # present it is passed to the Kalman filter as this measurement's noise R;
+    # when None the tracker falls back to its fixed isotropic R.
+    covariance: Optional[np.ndarray] = None
 
 
 @dataclass
@@ -104,16 +110,13 @@ class Tracker:
             dt = timestamp - self._last_update_time
         self._last_update_time = timestamp
         
-        # Get current tracks
-        active_tracks = self._track_manager.active_tracks
-        
-        # Predict all tracks forward
-        predicted_positions = []
-        track_ids = []
-        for track in active_tracks:
-            self._track_manager.predict_track(track.track_id, dt)
-            predicted_positions.append(track.position)
-            track_ids.append(track.track_id)
+        # Predict all active tracks forward in one vectorized batch call,
+        # instead of looping predict_track() once per track (which used
+        # to rebuild the same dt-dependent F/Q matrices from scratch on
+        # every single track).
+        active_tracks = self._track_manager.predict_all_active(dt)
+        predicted_positions = [track.position for track in active_tracks]
+        track_ids = [track.track_id for track in active_tracks]
         
         # Get detection positions
         measurements = [d.position for d in detections]
@@ -140,7 +143,8 @@ class Tracker:
                 det.position,
                 dt,
                 class_id=det.class_id,
-                confidence=det.confidence
+                confidence=det.confidence,
+                measurement_covariance=getattr(det, 'covariance', None)
             )
             updated_tracks.append(track_id)
         
@@ -161,7 +165,8 @@ class Tracker:
             track = self._track_manager.create_track(
                 det.position,
                 class_id=det.class_id,
-                confidence=det.confidence
+                confidence=det.confidence,
+                measurement_covariance=getattr(det, 'covariance', None)
             )
             new_tracks.append(track.track_id)
         

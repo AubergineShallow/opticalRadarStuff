@@ -1,3 +1,4 @@
+
 """
 ray_builder.py
 PURPOSE: Convert camera detections to 3D rays.
@@ -71,9 +72,14 @@ class RayBuilder:
         self.ref_lat = reference_lat
         self.ref_lon = reference_lon
         self.ref_alt = reference_alt
-        
+
         # Camera states (updated per packet)
         self._cameras: dict = {}
+
+        # Calibration offsets keyed by camera_id. Stored independently of
+        # camera state so an offset can be set/persisted before the camera's
+        # first packet arrives (P1.5).
+        self._calibration_offsets: dict = {}
     
     def update_camera(
         self,
@@ -121,13 +127,25 @@ class RayBuilder:
     ) -> None:
         """
         Set calibration offset for camera orientation.
-        
+
+        Works whether or not the camera has been seen yet (offsets loaded from
+        disk at startup are applied before the first packet).
+
         Args:
             camera_id: Camera ID
             offset_quaternion: Calibration correction quaternion
         """
+        offset_quaternion = tuple(float(x) for x in offset_quaternion)
+        self._calibration_offsets[camera_id] = offset_quaternion
         if camera_id in self._cameras:
             self._cameras[camera_id].calibration_offset = offset_quaternion
+
+    def get_calibration_offset(
+        self,
+        camera_id: str
+    ) -> Optional[Tuple[float, float, float, float]]:
+        """Return the applied calibration offset for a camera, or None."""
+        return self._calibration_offsets.get(camera_id)
     
     def angles_to_direction(
         self,
@@ -188,10 +206,11 @@ class RayBuilder:
         
         # Apply camera orientation
         world_direction = rotate_vector(body_direction, state.orientation)
-        
-        # Apply calibration offset if present
-        if state.calibration_offset:
-            world_direction = rotate_vector(world_direction, state.calibration_offset)
+
+        # Apply calibration offset if present (centralised, see P1.5)
+        offset = self._calibration_offsets.get(camera_id)
+        if offset:
+            world_direction = rotate_vector(world_direction, offset)
         
         # Normalize
         world_direction = world_direction / np.linalg.norm(world_direction)
@@ -228,14 +247,20 @@ class RayBuilder:
         """
         # Update camera state
         self.update_camera(camera_id, latitude, longitude, altitude, orientation)
-        
-        # Build rays
+
+        # Build rays. Accept both (azimuth, elevation, intensity) tuples and
+        # MotionVector dataclasses (which is what TelemetryPacket.vectors holds,
+        # and what server_main._process_packet passes in).
         rays = []
-        for az, el, intensity in vectors:
+        for vec in vectors:
+            if hasattr(vec, 'azimuth'):
+                az, el, intensity = vec.azimuth, vec.elevation, vec.intensity
+            else:
+                az, el, intensity = vec
             ray = self.build_ray(camera_id, az, el, intensity / 255.0)
             if ray:
                 rays.append(ray)
-        
+
         return rays
     
     def get_camera_position(self, camera_id: str) -> Optional[np.ndarray]:

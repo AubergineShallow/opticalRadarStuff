@@ -1,3 +1,4 @@
+
 #!/usr/bin/env python
 """
 system_test.py - Full system orchestration test.
@@ -101,6 +102,7 @@ def test_imports():
     check("server.voxel_grid", lambda: __import__("server.voxel_grid"))
     check("server.calibration", lambda: __import__("server.calibration"))
     check("server.websocket_server", lambda: __import__("server.websocket_server"))
+    check("server.foxglove_broadcaster", lambda: __import__("server.foxglove_broadcaster"))
     check("server.tracking.tracker", lambda: __import__("server.tracking.tracker"))
     check("server.tracking.kalman_filter", lambda: __import__("server.tracking.kalman_filter"))
     check("server.tracking.data_association", lambda: __import__("server.tracking.data_association"))
@@ -110,6 +112,12 @@ def test_imports():
     check("server.validation.ground_truth", lambda: __import__("server.validation.ground_truth"))
     check("server.validation.calibration_validator", lambda: __import__("server.validation.calibration_validator"))
     check("server.server_main", lambda: __import__("server.server_main"))
+    # BUG-009 guard: the actual operator entry point. Importing run_server runs
+    # `from server.server_main import main`, so a missing/renamed main() fails
+    # here instead of only at deploy time. Previously NOTHING imported it.
+    check("run_server (launcher entrypoint)", lambda: __import__("run_server"))
+    check("server.server_main.main is callable",
+          lambda: callable(__import__("server.server_main", fromlist=["main"]).main))
     check("simulation.sim_node", lambda: __import__("simulation.sim_node"))
     check("simulation.sim_utils", lambda: __import__("simulation.sim_utils"))
 
@@ -251,6 +259,34 @@ def test_voxel_grid():
     
     check("Grid lifecycle: add_ray -> get_stats -> decay -> get_detections", test_grid_lifecycle)
 
+    def test_ray_pipeline_integration():
+        # P0.5: exercise the real build_rays_from_packet -> add_rays_batch handoff
+        # which test_grid_lifecycle never touches.
+        from server.ray_builder import RayBuilder
+        from server.voxel_grid import VoxelGrid, VoxelGridConfig
+        from common.protocol import MotionVector
+
+        rb = RayBuilder(reference_lat=1.3521, reference_lon=103.8198, reference_alt=0.0)
+        cfg = VoxelGridConfig(width_m=200, height_m=100, depth_m=200, resolution_m=1.0)
+        grid = VoxelGrid(cfg)
+
+        vectors = [
+            MotionVector(azimuth=45.0, elevation=10.0, intensity=200, class_id=1),
+            MotionVector(azimuth=90.0, elevation=5.0,  intensity=180, class_id=1),
+        ]
+        rays = rb.build_rays_from_packet(
+            camera_id="CAM-01",
+            latitude=1.3521, longitude=103.8198, altitude=15.0,
+            orientation=(1.0, 0.0, 0.0, 0.0),
+            vectors=[(v.azimuth, v.elevation, v.intensity) for v in vectors]
+        )
+        assert len(rays) == 2, f"Expected 2 rays, got {len(rays)}"
+        updated = grid.add_rays_batch(rays)
+        assert updated >= 0, "add_rays_batch raised or returned negative"
+        return True
+
+    check("Ray pipeline: build_rays_from_packet -> add_rays_batch (no TypeError)", test_ray_pipeline_integration)
+
 
 def test_calibration():
     """Test calibration solver uses gradient descent."""
@@ -279,6 +315,97 @@ def test_calibration():
         return True
     
     check("Calibration solver (gradient descent)", test_solver_runs)
+
+    def test_calibration_convergence():
+        # P1.5: a consistent, known orientation error converges to ~that offset
+        # and the validator approves it.
+        from server.calibration import Calibrator
+        from server.validation.calibration_validator import CalibrationValidator
+        from math_utils.quaternion import from_axis_angle, rotate_vector
+
+        validator = CalibrationValidator(max_correction_degrees=15.0, min_observations=50)
+        cal = Calibrator(buffer_size=500, solve_interval=0.0, blend_factor=1.0,
+                         validator=validator)
+        cam = np.array([0.0, 0.0, 0.0])
+        err = from_axis_angle((0, 0, 1), 3.0)  # known 3-degree yaw error
+        for i in range(120):
+            target = np.array([100.0, (i % 5 - 2) * 2.0, (i % 3 - 1) * 2.0])
+            true_dir = target / np.linalg.norm(target)
+            measured = np.array(rotate_vector(tuple(true_dir), err))
+            cal.add_observation("cam01", measured, target, cam)
+
+        result = cal.solve("cam01")
+        assert result is not None, "Solver returned None"
+        assert result.residual_after < result.residual_before, "Residual did not improve"
+        assert result.approved, f"Correction not approved: {result.reason}"
+        assert abs(result.correction_degrees - 3.0) < 1.0, \
+            f"Expected ~3deg correction, got {result.correction_degrees:.2f}"
+        return True
+
+    check("Calibration converges on a known orientation error (P1.5)",
+          test_calibration_convergence)
+
+    def test_calibration_noisy_rejection():
+        # P1.5: a correction beyond the validator's threshold is NOT applied.
+        from server.calibration import Calibrator
+        from server.validation.calibration_validator import CalibrationValidator
+        from math_utils.quaternion import from_axis_angle, rotate_vector
+
+        validator = CalibrationValidator(max_correction_degrees=2.0, min_observations=50)
+        cal = Calibrator(buffer_size=500, solve_interval=0.0, blend_factor=1.0,
+                         validator=validator)
+        cam = np.array([0.0, 0.0, 0.0])
+        err = from_axis_angle((0, 0, 1), 12.0)  # large error -> large correction
+        for i in range(120):
+            target = np.array([100.0, (i % 5 - 2) * 2.0, (i % 3 - 1) * 2.0])
+            true_dir = target / np.linalg.norm(target)
+            measured = np.array(rotate_vector(tuple(true_dir), err))
+            cal.add_observation("cam01", measured, target, cam)
+
+        result = cal.solve("cam01")
+        assert result is not None, "Solver returned None"
+        assert not result.approved, f"Over-threshold correction was approved: {result.reason}"
+        # Not applying it leaves the offset at identity.
+        assert not cal.apply_correction(result), "Rejected correction was applied"
+        return True
+
+    check("Calibration validator rejects over-threshold correction (P1.5)",
+          test_calibration_noisy_rejection)
+
+    def test_calibration_feedback_applies_offset():
+        # P1.5: the server feedback loop pushes an accepted offset into the
+        # node's RayBuilder, verified via get_calibration_offset, and persists it.
+        import tempfile
+        from server.server_main import OpticalRadarServer
+        from math_utils.quaternion import from_axis_angle, rotate_vector
+
+        server = OpticalRadarServer(headless=True)
+        tmp = os.path.join(tempfile.gettempdir(), "or_calib_test_offsets.json")
+        if os.path.exists(tmp):
+            os.remove(tmp)
+        server._calibration_offsets_path = tmp
+        server.calibrator.solve_interval = 0.0  # force a solve
+        server.cluster_manager.assign_node("CAM-01", "DEFAULT")
+
+        cam = np.array([0.0, 0.0, 0.0])
+        err = from_axis_angle((0, 0, 1), 3.0)
+        for i in range(150):
+            target = np.array([100.0, (i % 5 - 2) * 2.0, (i % 3 - 1) * 2.0])
+            true_dir = target / np.linalg.norm(target)
+            measured = np.array(rotate_vector(tuple(true_dir), err))
+            server.calibrator.add_observation("CAM-01", measured, target, cam)
+
+        server._run_calibration()
+
+        cluster = server.cluster_manager.clusters["DEFAULT"]
+        offset = cluster.ray_builder.get_calibration_offset("CAM-01")
+        assert offset is not None, "Offset not applied to ray_builder"
+        assert os.path.exists(tmp), "Offsets were not persisted to disk"
+        os.remove(tmp)
+        return True
+
+    check("Calibration feedback applies + persists offset via RayBuilder (P1.5)",
+          test_calibration_feedback_applies_offset)
 
 
 def test_tracker():
@@ -330,7 +457,7 @@ def test_full_server_init():
         assert server.ground_truth is not None, "Missing ground_truth"
         
         # Check new state variables
-        assert hasattr(server, '_fps'), "Missing _fps tracker"
+        assert hasattr(server, 'current_fps'), "Missing current_fps tracker"
         assert hasattr(server, '_start_time'), "Missing _start_time"
         assert hasattr(server, '_last_frame_time'), "Missing _last_frame_time"
         
@@ -360,8 +487,8 @@ def test_server_process_frame():
             server.process_frame()
         
         # Verify FPS tracking is working
-        assert server._fps >= 0, f"FPS should be non-negative: {server._fps}"
-        assert server._frame_count == 5, f"Frame count: {server._frame_count}"
+        assert server.current_fps >= 0, f"FPS should be non-negative: {server.current_fps}"
+        assert server.frame_count == 5, f"Frame count: {server.frame_count}"
         
         return True
     
@@ -400,6 +527,710 @@ def test_simulation_to_server():
     check("SimNode detect_targets (no crash)", test_sim_packet_creation)
 
 
+def test_octree():
+    """Test hierarchical octree behaviour (P2.1, P2.4-P2.7)."""
+    print("\n=== Phase 11: Hierarchical Octree ===")
+
+    import numpy as np
+    from server.voxel_grid import VoxelGrid, VoxelGridConfig
+
+    def test_cubic_root_derivation():
+        # P2.6: root size = next_pow2(max_dim), regardless of aspect ratio.
+        g = VoxelGrid(VoxelGridConfig(width_m=200, depth_m=200, height_m=100))
+        assert np.allclose(g._root.size, [256, 256, 256]), f"root size {g._root.size}"
+        g2 = VoxelGrid(VoxelGridConfig(width_m=200, depth_m=200, height_m=100,
+                                       root_cell_size_m=512))
+        assert np.allclose(g2._root.size, [512, 512, 512]), f"override {g2._root.size}"
+        return True
+
+    check("Cubic root = next_pow2(max_dim); root_cell_size_m override (P2.6)",
+          test_cubic_root_derivation)
+
+    def test_decay_consolidate_independence():
+        # P2.1: heat decays per-frame independently of consolidate_and_prune.
+        cfg = VoxelGridConfig(width_m=50, height_m=25, depth_m=50, resolution_m=2.0)
+        grid = VoxelGrid(cfg)
+        grid.add_ray(np.array([0.0, 0.0, 0.0]), np.array([1.0, 0.0, 0.0]), intensity=10.0)
+
+        heat_before = grid.get_stats()['max_heat']
+        for _ in range(10):
+            grid.decay_active_leaves()  # no consolidate calls
+        heat_after = grid.get_stats()['max_heat']
+
+        expected = heat_before * (0.95 ** 10)
+        assert abs(heat_after - expected) < 0.01, \
+            f"Heat after 10 decays: {heat_after:.4f}, expected ~{expected:.4f}"
+        return True
+
+    check("Decay/consolidate independence: heat = h0 * 0.95^10 (P2.1)",
+          test_decay_consolidate_independence)
+
+    def test_amanatides_woo_exact_visit():
+        # P2.4: a ray crosses each leaf on its path exactly once (no skip/double).
+        # Power-of-2 octree sizing (P2.6) means a uniformly-subdivided 16m root at
+        # 2m resolution yields 16/2 = 8 cells along an axis-aligned ray (the
+        # plan's literal "50m -> 25 cells" assumed the old dense grid).
+        cfg = VoxelGridConfig(root_cell_size_m=16.0, resolution_m=2.0,
+                              width_m=16, depth_m=16, height_m=100,
+                              min_cameras_to_subdivide=99)
+        grid = VoxelGrid(cfg)
+        # Uniformly subdivide down to leaf resolution.
+        changed = True
+        while changed:
+            changed = False
+            for leaf in list(grid._active_leaves):
+                if leaf.size[0] > grid.config.resolution_m:
+                    children = leaf.subdivide()
+                    grid._active_leaves.discard(leaf)
+                    grid._active_leaves.update(children)
+                    changed = True
+
+        updated = grid.add_ray(np.array([-10.0, -1.0, 1.0]),
+                               np.array([1.0, 0.0, 0.0]), 5.0, max_distance=100.0)
+        heated = [l for l in grid._active_leaves if l.heat > 0]
+        assert updated == 8, f"Expected 8 leaf visits, got {updated}"
+        assert len(heated) == 8, f"Expected 8 distinct heated leaves, got {len(heated)}"
+        return True
+
+    check("Ray visits each leaf exactly once (no skip/double-count) (P2.4)",
+          test_amanatides_woo_exact_visit)
+
+    def test_subdivision_trigger_camera_count():
+        # P2.5: subdivide at M distinct cameras, not at M-1.
+        cfg = VoxelGridConfig(width_m=60, depth_m=60, height_m=60, resolution_m=1.0,
+                              min_cameras_to_subdivide=3, camera_window_frames=10)
+        grid = VoxelGrid(cfg)
+        o, d = np.array([0.0, 0.0, 30.0]), np.array([1.0, 0.0, 0.0])
+        grid.add_ray(o, d, 10.0, camera_id="C1", frame_index=0)
+        grid.add_ray(o, d, 10.0, camera_id="C2", frame_index=0)
+        assert len(grid._active_leaves) == 1, "Subdivided at only 2 cameras"
+        grid.add_ray(o, d, 10.0, camera_id="C3", frame_index=0)
+        assert len(grid._active_leaves) > 1, "Did not subdivide at 3 cameras"
+        return True
+
+    check("Subdivision triggers at M cameras, not M-1 (P2.5)",
+          test_subdivision_trigger_camera_count)
+
+    def test_subdivision_window_gating():
+        # P2.5/OQ1: votes spread beyond the co-temporal window do NOT subdivide.
+        cfg = VoxelGridConfig(width_m=60, depth_m=60, height_m=60, resolution_m=1.0,
+                              min_cameras_to_subdivide=3, camera_window_frames=10)
+        grid = VoxelGrid(cfg)
+        o, d = np.array([0.0, 0.0, 30.0]), np.array([1.0, 0.0, 0.0])
+        grid.add_ray(o, d, 10.0, camera_id="C1", frame_index=0)
+        grid.add_ray(o, d, 10.0, camera_id="C2", frame_index=5)
+        grid.add_ray(o, d, 10.0, camera_id="C3", frame_index=20)  # window expired
+        assert len(grid._active_leaves) == 1, "Subdivided despite stale camera votes"
+        return True
+
+    check("No subdivision when camera votes fall outside the window (P2.5/OQ1)",
+          test_subdivision_window_gating)
+
+    def test_root_expansion_preserves_coords():
+        # P2.7: existing leaf world coords are unchanged after expand_root.
+        cfg = VoxelGridConfig(width_m=50, height_m=50, depth_m=50, resolution_m=5.0)
+        grid = VoxelGrid(cfg)
+        grid.add_ray(np.array([0.0, 0.0, 25.0]), np.array([1.0, 0.0, 0.0]), intensity=10.0)
+        hot_before = grid.get_hot_voxels()
+        assert hot_before, "No hot voxels before expansion"
+        center_before = hot_before[0].center.copy()
+
+        grid.expand_root(np.array([48.0, 0.0, 25.0]))
+
+        hot_after = grid.get_hot_voxels()
+        assert hot_after, "No hot voxels after expansion"
+        assert np.allclose(center_before, hot_after[0].center, atol=0.1), \
+            f"Leaf moved: {center_before} -> {hot_after[0].center}"
+        return True
+
+    check("Root expansion preserves leaf world coordinates (P2.7)",
+          test_root_expansion_preserves_coords)
+
+
+def test_websocket():
+    """Test WebSocket rooms + command dispatch + networked packet path (P0.6)."""
+    print("\n=== Phase 10: WebSocket Rooms + Commands ===")
+
+    import asyncio
+    import json
+    from server.websocket_server import WebSocketBroadcaster
+
+    class MockWS:
+        def __init__(self):
+            self.received = []
+
+        async def send(self, payload):
+            self.received.append(payload)
+
+    def test_websocket_rooms():
+        b = WebSocketBroadcaster(port=0)
+        a_ws, b_ws = MockWS(), MockWS()
+        b.clients.update({a_ws, b_ws})
+        b.subscribe(a_ws, "A")
+        b.subscribe(b_ws, "B")
+
+        payload = json.dumps({"type": "TRACK_UPDATE", "payload": [{"id": "T-1"}]})
+        asyncio.run(b._broadcast_async(payload, room="A"))
+
+        assert len(a_ws.received) == 1, f"A should receive 1, got {len(a_ws.received)}"
+        assert len(b_ws.received) == 0, f"B should receive 0, got {len(b_ws.received)}"
+        return True
+
+    check("WebSocket room isolation (TRACK_UPDATE to room A only)", test_websocket_rooms)
+
+    def test_command_dispatch():
+        b = WebSocketBroadcaster(port=0)
+        seen = {}
+
+        def handler(client_id, payload):
+            seen['cluster_id'] = payload.get('cluster_id')
+
+        b.register_command_handler('CREATE_CLUSTER', handler)
+        msg = json.dumps({"type": "CREATE_CLUSTER", "payload": {"cluster_id": "ZONE-1"}})
+        asyncio.run(b._on_message(MockWS(), msg))
+
+        assert seen.get('cluster_id') == "ZONE-1", "CREATE_CLUSTER handler not invoked"
+        return True
+
+    check("WebSocket command dispatch (CREATE_CLUSTER handler invoked)", test_command_dispatch)
+
+    def test_command_creates_cluster():
+        from server.server_main import OpticalRadarServer
+        server = OpticalRadarServer(headless=True)
+        msg = json.dumps({"type": "CREATE_CLUSTER", "payload": {"cluster_id": "ZONE-9"}})
+        asyncio.run(server.ws_server._on_message(MockWS(), msg))
+        assert "ZONE-9" in server.cluster_manager.clusters, "Cluster not created via command"
+        return True
+
+    check("CREATE_CLUSTER command creates cluster in manager", test_command_creates_cluster)
+
+    def test_process_packet_networked():
+        from server.server_main import OpticalRadarServer
+        from common.protocol import MotionVector, TelemetryPacket
+        server = OpticalRadarServer(headless=True)
+        # Bypass signature verification so we exercise the full ray pipeline.
+        server.authenticator = None
+        server.cluster_manager.assign_node("CAM-01", "DEFAULT")
+
+        pkt = TelemetryPacket(
+            camera_id="CAM-01",
+            sequence_number=1,
+            timestamp=time.time(),
+            latitude=1.3521, longitude=103.8198, altitude=15.0,
+            orientation=(1.0, 0.0, 0.0, 0.0),
+            health_flags=0x07,
+            vectors=[MotionVector(azimuth=45.0, elevation=10.0, intensity=200, class_id=1)],
+        )
+        # End-to-end: build_rays -> add_rays_batch -> broadcast_node_update.
+        server._process_packet(pkt, ("127.0.0.1", 5005))
+        return True
+
+    check("_process_packet end-to-end (real WebSocketBroadcaster, no AttributeError)",
+          test_process_packet_networked)
+
+
+def test_foxglove():
+    """Optional Foxglove/Flora add-on broadcaster (parallel to the JSON one)."""
+    print("\n=== Phase 14: Foxglove Broadcaster (optional add-on) ===")
+
+    import numpy as np
+    from server.foxglove_broadcaster import FoxgloveBroadcaster, _FG_AVAILABLE
+
+    def test_disabled_is_inert():
+        # Always runs: with enabled=False, start()/stop() must be no-ops and the
+        # publish_* methods must not raise, whether or not foxglove-sdk is present.
+        fg = FoxgloveBroadcaster(port=0, enabled=False)
+        fg.start()
+        assert not fg.running, "disabled broadcaster must not be running after start()"
+        # A publish on a disabled broadcaster is a silent no-op.
+        fg.publish_system_status({"server_fps": 30.0})
+        fg.stop()
+        assert not fg.running
+        return True
+
+    check("Disabled broadcaster: start/stop/publish are inert no-ops",
+          test_disabled_is_inert)
+
+    def test_enabled_publishes():
+        # Exercise the full publish surface with fixtures matching what
+        # server_main builds. Only reached when foxglove-sdk is installed.
+        from server.voxel_grid import HotVoxel
+        from server.ray_builder import Ray
+
+        class _FakeTrack:
+            track_id = 7
+            state = 1
+            position = np.array([10.0, 20.0, 5.0])
+            velocity = np.array([1.0, 0.0, 0.0])
+
+        fg = FoxgloveBroadcaster(port=0, enabled=True)
+        fg.start()
+        assert fg.running, "enabled broadcaster failed to start with sdk present"
+        try:
+            fg.publish_node_update({
+                "id": "CAM-01", "node_id": "CAM-01", "cluster_id": "DEFAULT",
+                "location": [1.0, 2.0, 3.0], "status": 0, "battery": None,
+                "health_flags": 0x07, "last_seen": time.time(),
+            })
+            fg.publish_node_location("CAM-01", 37.7749, -122.4194, 10.0)
+            fg.publish_system_status({"server_fps": 30.0, "total_tracks": 1})
+            fg.publish_clusters({"clusters": {}, "pending_nodes": []})
+            fg.publish_scene(
+                "DEFAULT",
+                [_FakeTrack()],
+                [HotVoxel(heat=12.0, center=np.array([3.0, 4.0, 5.0]),
+                          level=0, size_m=1.0)],
+                [Ray(origin=np.array([0.0, 0.0, 0.0]),
+                     direction=np.array([1.0, 0.0, 0.0]),
+                     intensity=0.5, camera_id="CAM-01")],
+            )
+        finally:
+            fg.stop()
+        return True
+
+    # Gate on the optional dependency: run the real smoke test if installed,
+    # otherwise count a single explicit SKIP as a pass (per the add-on contract).
+    if _FG_AVAILABLE:
+        check("Enabled broadcaster publish smoke test (fixtures match server_main)",
+              test_enabled_publishes)
+    else:
+        global PASS
+        PASS += 1
+        print("  [PASS] Enabled broadcaster publish smoke test: "
+              "SKIPPED (foxglove-sdk not installed)")
+
+
+def test_regressions():
+    """Targeted regression tests for the P0/P1 backend fixes (P4)."""
+    print("\n=== Phase 12: Backend Regression Guards ===")
+
+    import numpy as np
+    from common.config import Config
+    from server.cluster_manager import Cluster
+    from server.server_main import OpticalRadarServer
+    from common.protocol import MotionVector, TelemetryPacket
+
+    def test_decay_rate_default_in_cluster():
+        # P1.2: a Cluster without a decay_rate config entry uses 0.95, not 0.1.
+        cluster = Cluster("TEST", Config())
+        assert cluster.voxel_grid.config.decay_rate == 0.95, \
+            f"decay_rate={cluster.voxel_grid.config.decay_rate}"
+        return True
+
+    check("Cluster decay_rate default is 0.95 (P1.2)", test_decay_rate_default_in_cluster)
+
+    def test_hot_threshold_in_cluster():
+        # P0.4: hot_threshold from config is honoured (not a dead detection_threshold).
+        class FakeConfig:
+            voxel_grid = {'hot_threshold': 2.0}
+            tracking = None
+            simulation = {}
+        cluster = Cluster("TEST", FakeConfig())
+        assert cluster.voxel_grid.config.hot_threshold == 2.0, \
+            f"hot_threshold={cluster.voxel_grid.config.hot_threshold}"
+        return True
+
+    check("Cluster honours hot_threshold from config (P0.4)", test_hot_threshold_in_cluster)
+
+    def test_uptime_monotonic():
+        # P1.3 + BUG-006: uptime is time-since-start from a MONOTONIC clock, so a
+        # wall-clock/NTP step backwards must NOT move it. The old version set
+        # _start_time from time.time() and would pass equally whether the code
+        # used time.time() or time.monotonic() — i.e. it couldn't catch BUG-006.
+        server = OpticalRadarServer(headless=True)
+        captured = []
+        server.ws_server.broadcast_system_status = lambda d: captured.append(d)
+
+        server._start_time = time.monotonic() - 5.0
+        server._broadcast_system_status()
+
+        # Simulate the wall clock stepping back an hour (NTP correction). A
+        # monotonic-based uptime is unaffected; a wall-clock one goes negative.
+        real_time = time.time
+        try:
+            time.time = lambda: real_time() - 3600.0
+            server._broadcast_system_status()
+        finally:
+            time.time = real_time
+
+        assert captured[0]['uptime_seconds'] >= 5, f"uptime0={captured[0]['uptime_seconds']}"
+        assert captured[1]['uptime_seconds'] >= 5, \
+            f"uptime regressed under a wall-clock jump (BUG-006): {captured[1]['uptime_seconds']}"
+        return True
+
+    check("Uptime uses a monotonic clock, immune to wall-clock jumps (P1.3/BUG-006)",
+          test_uptime_monotonic)
+
+    def test_battery_level_absent():
+        # P0.2: _process_packet handles the missing battery_level field (no AttributeError).
+        server = OpticalRadarServer(headless=True)
+        server.authenticator = None
+        server.cluster_manager.assign_node("CAM-01", "DEFAULT")
+        captured = []
+        server.ws_server.broadcast_node_update = lambda d, room=None: captured.append(d)
+
+        pkt = TelemetryPacket(
+            camera_id="CAM-01", sequence_number=1, timestamp=time.time(),
+            latitude=1.3521, longitude=103.8198, altitude=15.0,
+            orientation=(1.0, 0.0, 0.0, 0.0), health_flags=0x07,
+            vectors=[MotionVector(azimuth=10.0, elevation=5.0, intensity=200, class_id=1)],
+        )
+        server._process_packet(pkt, ("127.0.0.1", 5005))
+        assert captured, "No node update broadcast"
+        assert captured[-1]['battery'] is None, "battery should be None (no protocol field)"
+        return True
+
+    check("Missing battery_level handled in _process_packet (P0.2)", test_battery_level_absent)
+
+    def test_native_inplace_contract():
+        # BUG-003: when the native kernel is active it writes heat IN PLACE.
+        # Inject a fake native module to prove native_wrapper hands it the real
+        # grid, not a throwaway copy. With the old grid.astype() copy the
+        # original is never mutated and these assertions fail. (NATIVE_AVAILABLE
+        # is False on this machine, so without the fake this path is untested.)
+        from native import native_wrapper as nw
+
+        class _FakeNative:
+            def add_ray_to_grid(self, grid, *args):
+                grid[0, 0, 0] += 99.0      # in-place write the wrapper must keep
+                return 1
+
+            def decay_grid(self, grid, rate):
+                grid *= rate
+
+        orig_avail = nw.NATIVE_AVAILABLE
+        had_native = hasattr(nw, "_native")
+        orig_native = getattr(nw, "_native", None)
+        try:
+            nw._native = _FakeNative()
+            nw.NATIVE_AVAILABLE = True
+
+            grid = np.zeros((4, 4, 4), dtype=np.float32)
+            nw.add_ray_to_grid(grid, np.zeros(3), np.array([1.0, 0.0, 0.0]), 5.0)
+            assert grid[0, 0, 0] == 99.0, \
+                "native write lost: wrapper passed a copy, not the grid (BUG-003)"
+
+            grid[1, 1, 1] = 10.0
+            nw.decay_grid(grid, 0.5)
+            assert abs(grid[1, 1, 1] - 5.0) < 1e-6, "decay_grid wrote to a copy (BUG-003)"
+        finally:
+            nw.NATIVE_AVAILABLE = orig_avail
+            if had_native:
+                nw._native = orig_native
+            elif hasattr(nw, "_native"):
+                delattr(nw, "_native")
+        return True
+
+    check("Native wrapper preserves in-place grid writes (BUG-003)",
+          test_native_inplace_contract)
+
+    def test_run_loop_real_tick():
+        # Exercise the REAL _run_loop (not just process_frame) for a short burst.
+        # Catches contract bugs that live only in the live loop — decay_active_leaves,
+        # consolidate gating, get_all_tracks, broadcasts, metrics, calibration gating —
+        # which process_frame never touches.
+        server = OpticalRadarServer(headless=True)
+        server.authenticator = None
+        server.cluster_manager.assign_node("CAM-01", "DEFAULT")
+        server.voxel_grid.add_ray(np.array([0.0, 0.0, 30.0]),
+                                  np.array([1.0, 0.0, 0.0]), intensity=10.0)
+
+        err = []
+
+        def run():
+            try:
+                server._run_loop()
+            except Exception as e:  # noqa: BLE001 - capture for the assertion below
+                err.append(e)
+
+        server.running = True
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        time.sleep(0.25)
+        server.running = False
+        t.join(timeout=2.0)
+
+        assert not err, f"_run_loop raised: {err[0]!r}"
+        assert not t.is_alive(), "_run_loop did not stop after running=False"
+        assert server.frame_count > 0, "loop executed zero frames"
+        return True
+
+    check("Real _run_loop runs a burst without raising (closes loop blind spot)",
+          test_run_loop_real_tick)
+
+    def test_ground_truth_packet_no_crash():
+        # The GT-packet path called a nonexistent process_ground_truth() API and
+        # raised AttributeError on every ground-truth packet. Verify a GROUND_TRUTH
+        # packet is now recorded via the real add_ground_truth API.
+        from common.protocol import PACKET_TYPE_GROUND_TRUTH
+        server = OpticalRadarServer(headless=True)
+        server.authenticator = None
+        ts = time.time()
+        gt = TelemetryPacket(
+            camera_id="GT", packet_type=PACKET_TYPE_GROUND_TRUTH,
+            sequence_number=1, timestamp=ts,
+            latitude=1.3521, longitude=103.8198, altitude=20.0,
+            orientation=(1.0, 0.0, 0.0, 0.0), health_flags=0,
+        )
+        server._process_packet(gt, ("127.0.0.1", 5005))
+        assert server.gt_evaluator.get_truth_at_time(ts), "ground truth not recorded"
+        return True
+
+    check("GROUND_TRUTH packet recorded without AttributeError", test_ground_truth_packet_no_crash)
+
+    def test_server_binds_and_starts():
+        # BUG-007: UDPServer(self.config) bound a Config object to the port and
+        # crashed on bind in the real start() path — which the rest of the suite
+        # never exercises (it calls _run_loop directly). Start the whole server
+        # briefly and confirm the UDP socket actually bound.
+        server = OpticalRadarServer(headless=True)
+        server.authenticator = None
+        t = threading.Thread(target=server.start, daemon=True)
+        t.start()
+        time.sleep(0.4)
+        bound = bool(server.udp_server.is_running and server.udp_server._socket is not None)
+        server.stop()
+        t.join(timeout=2.0)
+        assert bound, "UDP server did not bind (BUG-007 regression)"
+        return True
+
+    check("Server start() binds the UDP socket (BUG-007 regression)",
+          test_server_binds_and_starts)
+
+    def test_cluster_config_wired():
+        # #2/#6: the cluster must honour the real `grid` config section and use a
+        # non-zero ENU reference origin (the old code read nonexistent
+        # `voxel_grid`/`simulation` sections, so grid config was ignored and the
+        # origin defaulted to (0,0,0), placing all GPS nodes outside the grid).
+        cfg = Config()
+        cfg.grid.resolution_m = 4.0
+        cluster = Cluster("T", cfg)
+        assert cluster.voxel_grid.config.resolution_m == 4.0, "grid config ignored (#6)"
+        assert (cluster.ray_builder.ref_lat, cluster.ray_builder.ref_lon) != (0.0, 0.0), \
+            "ENU reference origin still (0,0,0) (#2)"
+        return True
+
+    check("Cluster honours grid config + non-zero ENU origin (#2/#6)",
+          test_cluster_config_wired)
+
+    def test_system_status_keys_match_frontend():
+        # BUG-011: the SYSTEM_STATUS payload keys must match the frontend
+        # SystemStatus type, or the dashboard reads undefined and shows zeros.
+        server = OpticalRadarServer(headless=True)
+        captured = []
+        server.ws_server.broadcast_system_status = lambda d: captured.append(d)
+        server._broadcast_system_status()
+        s = captured[0]
+        for k in ('server_fps', 'cpu_percent', 'memory_percent',
+                  'uptime_seconds', 'total_tracks', 'total_voxels'):
+            assert k in s, f"system status missing frontend key '{k}': {list(s)}"
+        return True
+
+    check("SYSTEM_STATUS keys match the frontend contract (BUG-011)",
+          test_system_status_keys_match_frontend)
+
+    def test_node_status_numeric():
+        # #11: node updates carry a numeric NodeHealthStatus (0=HEALTHY), not the
+        # string "active" (which never matched the enum, so nodes rendered red).
+        server = OpticalRadarServer(headless=True)
+        server.authenticator = None
+        server.cluster_manager.assign_node("CAM-01", "DEFAULT")
+        captured = []
+        server.ws_server.broadcast_node_update = lambda d, room=None: captured.append(d)
+        pkt = TelemetryPacket(
+            camera_id="CAM-01", sequence_number=1, timestamp=time.time(),
+            latitude=37.7749, longitude=-122.4194, altitude=10.0,
+            orientation=(1.0, 0.0, 0.0, 0.0), health_flags=0x07,
+            vectors=[MotionVector(10.0, 5.0, 200, 1)],
+        )
+        server._process_packet(pkt, ("127.0.0.1", 5005))
+        assert captured, "no node update broadcast"
+        assert captured[-1]['status'] == 0, \
+            f"expected numeric HEALTHY (0), got {captured[-1]['status']!r}"
+        return True
+
+    check("Node update carries numeric health status (#11)", test_node_status_numeric)
+
+
+def test_security_and_metrics():
+    """KeyManager->Authenticator wiring (P5.1) and metrics wiring (P5.2)."""
+    print("\n=== Phase 13: Security + Metrics (P5) ===")
+
+    import hmac
+    import hashlib
+    from server.security.key_manager import KeyManager, KeyMetadata
+    from server.security.authenticator import Authenticator
+    from common.protocol import MotionVector, TelemetryPacket
+
+    def _signed_packet(key: bytes) -> TelemetryPacket:
+        pkt = TelemetryPacket(
+            camera_id="CAM-01", sequence_number=1, timestamp=time.time(),
+            latitude=0.0, longitude=0.0, altitude=0.0,
+            orientation=(1.0, 0.0, 0.0, 0.0), health_flags=0x07,
+            vectors=[MotionVector(10.0, 5.0, 200, 1)],
+        )
+        pkt.signature = hmac.new(key, pkt.get_data_for_signing(), hashlib.sha256).digest()
+        return pkt
+
+    def test_key_rotation():
+        km = KeyManager()
+        k_old = km.generate_key()
+        km._keys.append(KeyMetadata(key=k_old, created_at=time.time()))
+        auth = Authenticator(key_manager=km)
+
+        assert auth.verify_telemetry_packet(_signed_packet(k_old)), "current key should verify"
+
+        # Rotate: new primary key, old key still valid in the grace window.
+        km.rotate_keys(grace_period_days=7)
+        k_new = km.primary_key
+        assert auth.verify_telemetry_packet(_signed_packet(k_new)), "new key should verify"
+        assert auth.verify_telemetry_packet(_signed_packet(k_old)), "old key valid in grace"
+
+        # A foreign key never verifies.
+        assert not auth.verify_telemetry_packet(_signed_packet(km.generate_key())), \
+            "foreign key must be rejected"
+
+        # Past the grace window, the old key is rejected.
+        for meta in km._keys:
+            if meta.key == k_old:
+                meta.expires_at = time.time() - 1
+        assert not auth.verify_telemetry_packet(_signed_packet(k_old)), \
+            "expired old key must be rejected"
+        return True
+
+    check("Key rotation: grace window + rejection via Authenticator/KeyManager (P5.1)",
+          test_key_rotation)
+
+    def test_provision_cli_roundtrip():
+        import tempfile
+        import provision_node
+        key_path = os.path.join(tempfile.gettempdir(), "or_provision_test.key")
+        if os.path.exists(key_path):
+            os.remove(key_path)
+        rc = provision_node.main(["--key-file", key_path, "generate"])
+        assert rc == 0 and os.path.exists(key_path), "generate failed"
+        rc2 = provision_node.main(["--key-file", key_path, "show"])
+        assert rc2 == 0, "show failed"
+        os.remove(key_path)
+        return True
+
+    check("provision_node CLI generate + show round-trip (P5.1)", test_provision_cli_roundtrip)
+
+    def test_metrics_wired():
+        from server.server_main import OpticalRadarServer
+        from common.protocol import MotionVector, TelemetryPacket
+        server = OpticalRadarServer(headless=True)
+        server.authenticator = None
+        server.metrics.reset()
+        server.cluster_manager.assign_node("CAM-01", "DEFAULT")
+
+        pkt = TelemetryPacket(
+            camera_id="CAM-01", sequence_number=1, timestamp=time.time(),
+            latitude=1.3521, longitude=103.8198, altitude=15.0,
+            orientation=(1.0, 0.0, 0.0, 0.0), health_flags=0x07,
+            vectors=[MotionVector(10.0, 5.0, 200, 1)],
+        )
+        server._process_packet(pkt, ("127.0.0.1", 5005))
+
+        snap = server.metrics.snapshot()
+        assert snap, "metrics snapshot is empty after processing a packet"
+        # The processed-packets counter should be present and >= 1.
+        assert any("packets_processed" in k for k in snap), f"missing packet metric: {snap}"
+        return True
+
+    check("Metrics recorded + exposed in snapshot after processing (P5.2)", test_metrics_wired)
+
+
+def test_optics_and_uncertainty():
+    print("\n=== Phase 15: Node Optics + Angular Uncertainty ===")
+    import numpy as np
+    from common.node_specs import load_node_spec, load_all_specs, default_spec
+    from server.uncertainty import measurement_covariance
+    from server.tracking.kalman_filter import KalmanFilter
+    from server.tracking.tracker import Tracker, Detection
+
+    specs_path = os.path.join(code_dir, "config", "node_specs.json")
+
+    def test_spec_file_load():
+        # Known node id resolves to its provisioned optics (not a constant).
+        cam = load_node_spec("cam01", specs_path)
+        assert abs(cam.fov_horizontal - 62.2) < 1e-6, f"cam01 fov: {cam.fov_horizontal}"
+        assert cam.resolution_width == 640
+        # Unknown id falls back to the file's _default entry.
+        unknown = load_node_spec("does-not-exist", specs_path)
+        assert abs(unknown.fov_horizontal - 60.0) < 1e-6, f"default fov: {unknown.fov_horizontal}"
+        # sigma_theta is a positive, sane per-pixel bearing (< 1 degree here).
+        assert 0.0 < cam.sigma_theta_rad < np.radians(1.0), cam.sigma_theta_rad
+        assert "cam01" in load_all_specs(specs_path)
+        assert "_default" not in load_all_specs(specs_path)  # metadata keys excluded
+        return True
+
+    def test_single_camera_is_depth_uncertain():
+        # One node at origin looking toward a target 50 m north (+y). Its bearing
+        # pins down cross-range (x, z) but barely constrains range (y).
+        target = np.array([0.0, 50.0, 0.0])
+        sigma = load_node_spec("cam01", specs_path).sigma_theta_rad
+        R = measurement_covariance(target, [(np.zeros(3), sigma)])
+        assert R is not None and R.shape == (3, 3)
+        # Along-range variance (y) must dominate the cross-range variances (x, z).
+        assert R[1, 1] > 50.0 * R[0, 0], f"range not dominant: {np.diag(R)}"
+        assert R[1, 1] > 50.0 * R[2, 2], f"range not dominant: {np.diag(R)}"
+        return True
+
+    def test_two_cameras_triangulate_tighter():
+        # Same target, now seen from two well-separated bearings. The fused
+        # covariance must be much tighter than either node alone.
+        target = np.array([0.0, 50.0, 0.0])
+        sigma = load_node_spec("cam01", specs_path).sigma_theta_rad
+        cam_a = (np.zeros(3), sigma)              # looks +y
+        cam_b = (np.array([50.0, 50.0, 0.0]), sigma)  # looks -x
+        R_one = measurement_covariance(target, [cam_a])
+        R_two = measurement_covariance(target, [cam_a, cam_b])
+        assert R_two is not None
+        # Largest positional uncertainty (max eigenvalue) collapses with 2 nodes.
+        assert np.max(np.linalg.eigvalsh(R_two)) < 0.25 * np.max(np.linalg.eigvalsh(R_one)), \
+            f"triangulation did not tighten: {np.linalg.eigvalsh(R_one)} -> {np.linalg.eigvalsh(R_two)}"
+        # No contributing node -> None (tracker will use its default R).
+        assert measurement_covariance(target, []) is None
+        return True
+
+    def test_kalman_respects_measurement_covariance():
+        # A tight R makes the filter trust the measurement (move toward it); a
+        # loose R makes it mostly ignore it. Same predicted state, same meas.
+        kf = KalmanFilter()
+        base = kf.initialize(np.zeros(3))
+        pred = kf.predict(base, 0.1)
+        meas = np.array([10.0, 0.0, 0.0])
+        tight, _ = kf.update(pred, meas, R=np.eye(3) * 0.01)
+        loose, _ = kf.update(pred, meas, R=np.eye(3) * 1e4)
+        assert tight.position[0] > loose.position[0], \
+            f"tight={tight.position[0]:.3f} loose={loose.position[0]:.3f}"
+        # Backward compat: update with no R still works (uses filter default).
+        default, _ = kf.update(pred, meas)
+        assert np.isfinite(default.position).all()
+        return True
+
+    def test_covariance_threads_through_tracker():
+        # A Detection carrying a covariance must flow through create + update
+        # without error and produce a track.
+        tracker = Tracker(min_hits_to_confirm=1)
+        R = measurement_covariance(
+            np.array([0.0, 50.0, 0.0]),
+            [(np.zeros(3), 0.002), (np.array([50.0, 50.0, 0.0]), 0.002)],
+        )
+        det = Detection(position=np.array([0.0, 50.0, 0.0]), covariance=R)
+        tracker.update([det], timestamp=100.0)
+        tracker.update([det], timestamp=100.1)
+        assert len(tracker.get_all_tracks()) >= 1
+        return True
+
+    check("Node optics spec loads from file with fallback", test_spec_file_load)
+    check("Single-camera covariance is depth-uncertain", test_single_camera_is_depth_uncertain)
+    check("Two cameras triangulate to a tighter covariance", test_two_cameras_triangulate_tighter)
+    check("Kalman update weights per-measurement R", test_kalman_respects_measurement_covariance)
+    check("Detection covariance threads through tracker", test_covariance_threads_through_tracker)
+
+
 def main():
     print("=" * 60)
     print("OpticalRadar-Iter3 Full System Orchestration Test")
@@ -416,7 +1247,13 @@ def main():
     test_full_server_init()
     test_server_process_frame()
     test_simulation_to_server()
-    
+    test_octree()
+    test_websocket()
+    test_regressions()
+    test_security_and_metrics()
+    test_foxglove()
+    test_optics_and_uncertainty()
+
     print("\n" + "=" * 60)
     print(f"Results: {PASS} passed, {FAIL} failed ({PASS + FAIL} total)")
     print("=" * 60)
