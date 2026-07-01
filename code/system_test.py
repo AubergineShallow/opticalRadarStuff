@@ -101,6 +101,7 @@ def test_imports():
     check("server.voxel_grid", lambda: __import__("server.voxel_grid"))
     check("server.calibration", lambda: __import__("server.calibration"))
     check("server.websocket_server", lambda: __import__("server.websocket_server"))
+    check("server.foxglove_broadcaster", lambda: __import__("server.foxglove_broadcaster"))
     check("server.tracking.tracker", lambda: __import__("server.tracking.tracker"))
     check("server.tracking.kalman_filter", lambda: __import__("server.tracking.kalman_filter"))
     check("server.tracking.data_association", lambda: __import__("server.tracking.data_association"))
@@ -400,6 +401,59 @@ def test_simulation_to_server():
     check("SimNode detect_targets (no crash)", test_sim_packet_creation)
 
 
+def test_foxglove():
+    """Test Foxglove broadcaster."""
+    print("\n=== Phase 10: Foxglove Broadcaster ===")
+
+    import time
+    from server.foxglove_broadcaster import FoxgloveBroadcaster, _FG_AVAILABLE
+    import numpy as np
+    from server.tracking.track_manager import Track, TrackState
+    from server.voxel_grid import HotVoxel
+    from server.ray_builder import Ray
+
+    def test_fg_init():
+        fg = FoxgloveBroadcaster(port=0, enabled=False)
+        fg.start()
+        fg.stop()
+        return True
+
+    check("FoxgloveBroadcaster init/start/stop (disabled)", test_fg_init)
+
+    def test_fg_publish():
+        if not _FG_AVAILABLE:
+            print("  [SKIP] foxglove-sdk not installed")
+            return True
+
+        fg = FoxgloveBroadcaster(port=0, enabled=True)
+        # Port 0 asks OS for random port to avoid conflicts
+        fg.start()
+
+        # Fake track
+        class FakeKalman:
+            position = np.array([10.0, 20.0, 30.0])
+            velocity = np.array([1.0, 2.0, 3.0])
+        t = Track(1, TrackState.CONFIRMED, FakeKalman())
+        t.physical_size = 5.0
+
+        # Fake voxel
+        hv = HotVoxel(1, 2, 3, 10.0, np.array([1.0, 2.0, 3.0]))
+        hv.size_m = 1.0
+
+        # Fake ray
+        ray = Ray(np.array([0., 0., 0.]), np.array([0., 1., 0.]), 255, "cam1")
+
+        fg.publish_node_update({"nodes": []})
+        fg.publish_node_location("cam1", 34.0, -118.0, 10.0)
+        fg.publish_system_status({"fps": 30.0})
+        fg.publish_clusters({"clusters": []})
+        fg.publish_scene("global", [t], [hv], [ray])
+
+        fg.stop()
+        return True
+
+    check("FoxgloveBroadcaster publish (enabled)", test_fg_publish)
+
 def main():
     print("=" * 60)
     print("OpticalRadar-Iter3 Full System Orchestration Test")
@@ -416,6 +470,7 @@ def main():
     test_full_server_init()
     test_server_process_frame()
     test_simulation_to_server()
+    test_foxglove()
     
     print("\n" + "=" * 60)
     print(f"Results: {PASS} passed, {FAIL} failed ({PASS + FAIL} total)")

@@ -37,6 +37,7 @@ try:
     from .security import Authenticator
     from .validation import CalibrationValidator, GroundTruthValidator
     from .websocket_server import WebSocketBroadcaster
+    from .foxglove_broadcaster import FoxgloveBroadcaster
 except ImportError:
     # Direct execution fallback
     from server.udp_server import UDPServer
@@ -53,6 +54,7 @@ except ImportError:
     from server.security import Authenticator
     from server.validation import CalibrationValidator, GroundTruthValidator
     from server.websocket_server import WebSocketBroadcaster
+    from server.foxglove_broadcaster import FoxgloveBroadcaster
 
 
 class OpticalRadarServer:
@@ -171,6 +173,12 @@ class OpticalRadarServer:
         except Exception as e:
             self.logger.error("system", f"Failed to init WebSocket: {e}")
             self.ws_server = None
+
+        # Foxglove Broadcaster
+        fg_config = getattr(self.config, 'foxglove', None)
+        fg_enabled = fg_config.enabled if fg_config else False
+        fg_port = fg_config.port if fg_config else 8765
+        self.fg_server = FoxgloveBroadcaster(port=fg_port, enabled=fg_enabled)
         
         # Visualizer
         self.visualizer = None
@@ -201,6 +209,8 @@ class OpticalRadarServer:
         # Start WebSocket server
         if self.ws_server:
             self.ws_server.start()
+
+        self.fg_server.start()
         
         # Setup visualizer
         if self.visualizer:
@@ -223,6 +233,8 @@ class OpticalRadarServer:
         
         if self.ws_server:
             self.ws_server.stop()
+
+        self.fg_server.stop()
         
         if self.visualizer:
             self.visualizer.close()
@@ -263,6 +275,13 @@ class OpticalRadarServer:
         
         # Run calibration and apply corrections to ray builder
         cal_results = self.calibrator.process()
+        # Publish scene to Foxglove
+        self.fg_server.publish_scene(
+            cluster_id="global",
+            tracks=self.tracker.get_confirmed_tracks(),
+            hot_voxels=self.voxel_grid.get_hot_voxels(),
+            rays=getattr(self, '_last_rays', [])
+        )
         for cal_result in cal_results:
             if cal_result.approved:
                 self.ray_builder.set_calibration_offset(
@@ -291,14 +310,18 @@ class OpticalRadarServer:
         """Broadcast system state to UI."""
         # 1. System Status
         grid_stats = self.voxel_grid.get_stats()
-        self.ws_server.broadcast("SYSTEM_STATUS", {
+
+        status_data = {
             "server_fps": round(self._fps, 1),
             "total_tracks": len(self.tracker.get_confirmed_tracks()),
             "total_voxels": grid_stats['hot_count'],
             "uptime_seconds": round(time.time() - self._start_time, 1),
             "cpu_percent": 0.0,
             "memory_percent": 0.0
-        })
+        }
+
+        self.ws_server.broadcast("SYSTEM_STATUS", status_data)
+        self.fg_server.publish_system_status(status_data)
         
         # 2. Tracks (consolidated)
         tracks = []
@@ -344,6 +367,11 @@ class OpticalRadarServer:
                 "config": record.sensor_config
             })
         self.ws_server.broadcast("NODE_UPDATE", nodes)
+        self.fg_server.publish_node_update({"nodes": nodes})
+
+        # 4. Clusters (placeholder for compatibility)
+        cluster_data = {"clusters": []}
+        self.fg_server.publish_clusters(cluster_data)
 
     def _process_packet(self, packet: object, receive_time: float) -> None:
         """Process a single telemetry packet based on its type."""
@@ -406,6 +434,14 @@ class OpticalRadarServer:
             packet.health_flags
         )
         
+        # Publish location to Foxglove
+        self.fg_server.publish_node_location(
+            packet.camera_id,
+            packet.latitude,
+            packet.longitude,
+            packet.altitude
+        )
+
         # Build rays from vectors
         vectors = [
             (v.azimuth, v.elevation, v.intensity)
@@ -422,6 +458,7 @@ class OpticalRadarServer:
         )
         
         # Add all rays to voxel grid
+        self._last_rays = rays
         for ray in rays:
             self.voxel_grid.add_ray(
                 ray.origin,

@@ -71,6 +71,12 @@ class IMUConfig:
 
 
 @dataclass
+class FoxgloveConfig:
+    enabled: bool = False
+    port: int = 8765
+
+
+@dataclass
 class Config:
     """Root configuration object."""
     system: SystemConfig = field(default_factory=SystemConfig)
@@ -81,6 +87,7 @@ class Config:
     monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
     gps: GPSConfig = field(default_factory=GPSConfig)
     imu: IMUConfig = field(default_factory=IMUConfig)
+    foxglove: FoxgloveConfig = field(default_factory=FoxgloveConfig)
 
 
 def _apply_env_overrides(config: Config) -> Config:
@@ -147,6 +154,8 @@ def load(path: Optional[str] = None) -> Config:
             config.gps = GPSConfig(**data['gps'])
         if 'imu' in data:
             config.imu = IMUConfig(**data['imu'])
+        if 'foxglove' in data:
+            config.foxglove = FoxgloveConfig(**data['foxglove'])
     
     # Apply environment overrides
     config = _apply_env_overrides(config)

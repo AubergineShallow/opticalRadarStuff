@@ -1,0 +1,1 @@
+foxglove-sdk>=0.25.0
