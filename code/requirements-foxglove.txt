@@ -1,0 +1,6 @@
+
+# Optional Foxglove/Flora live-streaming add-on. Kept separate from
+# requirements.txt so it never becomes an implicit hard dependency of the base
+# install. Enable at runtime with foxglove.enabled (config.yaml) or
+# OR_FOXGLOVE_ENABLED=true. See server/foxglove_broadcaster.py.
+foxglove-sdk

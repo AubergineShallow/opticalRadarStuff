@@ -1,3 +1,4 @@
+
 """
 lora_protocol.py
 PURPOSE: Defines a highly compressed micro-payload for LoRaWAN communication.

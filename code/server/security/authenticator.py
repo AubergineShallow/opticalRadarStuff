@@ -1,3 +1,4 @@
+
 """
 authenticator.py
 PURPOSE: HMAC-based authentication for telemetry packets.
@@ -46,28 +47,39 @@ class Authenticator:
         self,
         key: Optional[bytes] = None,
         key_file: Optional[str] = None,
-        max_timestamp_drift_sec: float = 30.0
+        max_timestamp_drift_sec: float = 30.0,
+        key_manager=None
     ):
         """
         Initialize authenticator.
-        
+
         Args:
             key: Shared secret key (raw bytes)
             key_file: Path to key file (alternative to key)
             max_timestamp_drift_sec: Max allowed age of packets
+            key_manager: Optional KeyManager that owns key storage/rotation.
+                When provided, verification keys are looked up from it per
+                node_id (P5.1), so there is a single key-management implementation.
         """
         self._keys: list[bytes] = []
         self.max_timestamp_drift = max_timestamp_drift_sec
-        
+        self.key_manager = key_manager
+
         if key:
             self._keys = [key]
         elif key_file:
             self.load_keys_from_file(key_file)
-        else:
-            # Try environment variable
+        elif key_manager is None:
+            # Try environment variable (only when not delegating to a KeyManager)
             env_key = os.environ.get('OPTICAL_RADAR_SECRET_KEY')
             if env_key:
                 self._keys = [self._decode_key(env_key)]
+
+    def _verification_keys(self, node_id: Optional[str] = None) -> list:
+        """Keys to try when verifying — from the KeyManager if injected."""
+        if self.key_manager is not None:
+            return self.key_manager.get_valid_keys(node_id)
+        return self._keys
     
     def _decode_key(self, key_str: str) -> bytes:
         """Decode base64 key string to bytes."""
@@ -137,23 +149,52 @@ class Authenticator:
         """
         return hmac.new(self.primary_key, data, hashlib.sha256).digest()
     
-    def verify(self, data: bytes, signature: bytes) -> bool:
+    def verify(self, data: bytes, signature: bytes, node_id: Optional[str] = None) -> bool:
         """
         Verify signature using constant-time comparison.
-        
+
         Args:
             data: Original data
             signature: Claimed signature
-        
+            node_id: Node whose key(s) to verify against (KeyManager lookup)
+
         Returns:
             True if signature is valid
         """
-        # Try all valid keys (for rotation support)
-        for key in self._keys:
+        # Try all valid keys (for rotation support / KeyManager grace window)
+        for key in self._verification_keys(node_id):
             expected = hmac.new(key, data, hashlib.sha256).digest()
             if hmac.compare_digest(expected, signature):
                 return True
         return False
+
+    def verify_telemetry_packet(self, packet: TelemetryPacket) -> bool:
+        """
+        Verify an already-unpacked TelemetryPacket (signature + replay window).
+
+        This is the object-level entry point used by server_main. Keys are
+        looked up per packet.camera_id via the injected KeyManager (P5.1).
+
+        Args:
+            packet: TelemetryPacket carrying .signature and .camera_id
+
+        Returns:
+            True if the packet is authentic and fresh.
+        """
+        signature = getattr(packet, 'signature', None)
+        if not signature:
+            return False
+
+        data = packet.get_data_for_signing()
+        if not self.verify(data, signature, node_id=getattr(packet, 'camera_id', None)):
+            return False
+
+        # Replay prevention
+        drift = abs(time.time() - packet.timestamp)
+        if drift > self.max_timestamp_drift:
+            return False
+
+        return True
     
     def sign_packet(self, packet: TelemetryPacket) -> TelemetryPacket:
         """

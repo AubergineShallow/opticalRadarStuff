@@ -1,3 +1,4 @@
+
 """Simulation module - virtual cameras and targets for testing."""
 
 from .sim_utils import (

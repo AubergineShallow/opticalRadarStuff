@@ -1,3 +1,4 @@
+
 """
 config.py
 PURPOSE: Centralized configuration management for Server and Nodes.
@@ -20,12 +21,17 @@ class SystemConfig:
 class NetworkConfig:
     server_ip: str = "0.0.0.0"
     udp_port: int = 5005
-    max_packet_size: int = 512
+    # Max UDP datagram. 512 silently truncated dense telemetry packets
+    # (300 vectors ~= 2.5 KB) inside recvfrom(); use the full UDP ceiling.
+    max_packet_size: int = 65535
 
 
 @dataclass
 class SecurityConfig:
-    enabled: bool = True
+    # Opt-in. Edge nodes ship unsigned, so a default of True silently dropped
+    # ALL real telemetry (BUG-008). Enable explicitly once a shared key has
+    # been provisioned (provision_node.py) on both server and nodes.
+    enabled: bool = False
     key_file: str = "secrets/shared.key"
     auth_timeout_sec: int = 30
 
@@ -59,6 +65,20 @@ class MonitoringConfig:
 
 
 @dataclass
+class CalibrationConfig:
+    """Self-calibration feedback loop (P1.5)."""
+    enabled: bool = True
+    buffer_size: int = 2000
+    solve_interval: float = 10.0        # seconds between solves
+    blend_factor: float = 0.1           # correction blend factor [0, 1]
+    max_correction_degrees: float = 15.0
+    min_observations: int = 100
+    min_track_hits: int = 3             # only feed confirmed tracks
+    association_radius_m: float = 10.0  # max ray-to-track distance to associate
+    offsets_file: str = "secrets/calibration_offsets.json"
+
+
+@dataclass
 class GPSConfig:
     port: str = "/dev/serial0"
     baud_rate: int = 9600
@@ -71,16 +91,53 @@ class IMUConfig:
 
 
 @dataclass
+class FoxgloveConfig:
+    """Optional Foxglove/Flora live-streaming add-on (parallel broadcaster).
+
+    Off by default: a future `pip install foxglove-sdk` must not silently start
+    streaming camera/track data. Enable explicitly to open the second listening
+    socket. Env overrides work automatically: OR_FOXGLOVE_ENABLED=true /
+    OR_FOXGLOVE_PORT=...
+    """
+    enabled: bool = False
+    port: int = 8765
+
+
+@dataclass
+class ServerConfig:
+    """Server runtime settings."""
+    ws_port: int = 5000          # MUST match the frontend Env.WS_URL
+    target_fps: int = 30
+
+
+@dataclass
+class ReferenceConfig:
+    """ENU reference origin.
+
+    MUST match the frontend COORDINATE_ORIGIN so backend ENU positions and the
+    map overlay share one coordinate frame. A (0,0,0) origin put every realistic
+    GPS node thousands of km outside the voxel grid, so nothing was ever tracked.
+    """
+    origin_lat: float = 37.7749   # San Francisco (matches NEW-UI-V2/constants.ts)
+    origin_lon: float = -122.4194
+    origin_alt: float = 0.0
+
+
+@dataclass
 class Config:
     """Root configuration object."""
     system: SystemConfig = field(default_factory=SystemConfig)
     network: NetworkConfig = field(default_factory=NetworkConfig)
+    server: ServerConfig = field(default_factory=ServerConfig)
+    reference: ReferenceConfig = field(default_factory=ReferenceConfig)
     security: SecurityConfig = field(default_factory=SecurityConfig)
     tracking: TrackingConfig = field(default_factory=TrackingConfig)
     grid: GridConfig = field(default_factory=GridConfig)
     monitoring: MonitoringConfig = field(default_factory=MonitoringConfig)
+    calibration: CalibrationConfig = field(default_factory=CalibrationConfig)
     gps: GPSConfig = field(default_factory=GPSConfig)
     imu: IMUConfig = field(default_factory=IMUConfig)
+    foxglove: FoxgloveConfig = field(default_factory=FoxgloveConfig)
 
 
 def _apply_env_overrides(config: Config) -> Config:
@@ -135,6 +192,10 @@ def load(path: Optional[str] = None) -> Config:
             config.system = SystemConfig(**data['system'])
         if 'network' in data:
             config.network = NetworkConfig(**data['network'])
+        if 'server' in data:
+            config.server = ServerConfig(**data['server'])
+        if 'reference' in data:
+            config.reference = ReferenceConfig(**data['reference'])
         if 'security' in data:
             config.security = SecurityConfig(**data['security'])
         if 'tracking' in data:
@@ -143,10 +204,14 @@ def load(path: Optional[str] = None) -> Config:
             config.grid = GridConfig(**data['grid'])
         if 'monitoring' in data:
             config.monitoring = MonitoringConfig(**data['monitoring'])
+        if 'calibration' in data:
+            config.calibration = CalibrationConfig(**data['calibration'])
         if 'gps' in data:
             config.gps = GPSConfig(**data['gps'])
         if 'imu' in data:
             config.imu = IMUConfig(**data['imu'])
+        if 'foxglove' in data:
+            config.foxglove = FoxgloveConfig(**data['foxglove'])
     
     # Apply environment overrides
     config = _apply_env_overrides(config)

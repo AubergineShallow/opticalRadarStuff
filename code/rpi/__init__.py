@@ -1,3 +1,4 @@
+
 """RPi edge node modules."""
 
 from .vision import VisionSystem, VisionConfig, MotionVector

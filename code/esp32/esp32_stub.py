@@ -1,3 +1,4 @@
+
 """
 esp32_stub.py
 PURPOSE: Python stub for ESP32 communication and coordination.
@@ -178,7 +179,9 @@ def main():
     parser.add_argument("--id", "-i", default="esp01", help="Node ID")
     parser.add_argument("--server", "-s", default="127.0.0.1", help="Server address")
     parser.add_argument("--port", "-p", type=int, default=UDP_PORT, help="Server port")
-    
+    parser.add_argument("--spec-file", default=None,
+                        help="Path to node optics spec JSON (default: config/node_specs.json)")
+
     args = parser.parse_args()
     
     config = ESP32Config(
@@ -196,12 +199,19 @@ def main():
         return
         
     print(f"Sending to {args.server}:{args.port}")
-    
-    # Constants for ESP32-CAM (OV2640)
-    FOV_H = 66.0
-    FOV_V = 50.0
-    RES_W = 800
-    RES_H = 600
+
+    # Optical spec is provisioned in config/node_specs.json (keyed by node id),
+    # NOT hardcoded here: an ESP32-CAM cannot read its lens FOV back in software,
+    # so it must be declared in a file. Falls back to the file's _default entry,
+    # then a built-in default, if this node id is absent.
+    from common.node_specs import load_node_spec
+    spec = load_node_spec(config.node_id, args.spec_file)
+    FOV_H = spec.fov_horizontal
+    FOV_V = spec.fov_vertical
+    RES_W = spec.resolution_width
+    RES_H = spec.resolution_height
+    print(f"Optics for {config.node_id}: {spec.sensor} "
+          f"FOV {FOV_H:.1f}x{FOV_V:.1f} @ {RES_W}x{RES_H}")
     
     try:
         last_announce = 0.0
