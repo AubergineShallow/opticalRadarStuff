@@ -1,3 +1,5 @@
+
+
 """
 calibration.py
 PURPOSE: Solve alignment errors with validation steps.
@@ -248,6 +250,16 @@ class Calibrator:
         
         return result
     
+    @staticmethod
+    def _quat_to_matrix(q: Tuple[float, float, float, float]) -> np.ndarray:
+        """Unit quaternion [w,x,y,z] -> 3x3 rotation matrix."""
+        w, x, y, z = q
+        return np.array([
+            [1 - 2*(y*y + z*z), 2*(x*y - w*z),     2*(x*z + w*y)],
+            [2*(x*y + w*z),     1 - 2*(x*x + z*z), 2*(y*z - w*x)],
+            [2*(x*z - w*y),     2*(y*z + w*x),     1 - 2*(x*x + y*y)],
+        ])
+
     def _calculate_residual(
         self,
         observations: List[_LocalCalibrationObservation],
@@ -257,17 +269,19 @@ class Calibrator:
         if not observations:
             return 0.0
 
-        from math_utils.quaternion import rotate_vector
-        
         # Extract into Nx3 arrays
         directions = np.array([obs.ray_direction for obs in observations])
         targets = np.array([obs.target_position for obs in observations])
         cameras = np.array([obs.camera_position for obs in observations])
-        
+
         if correction:
-            # Apply rotation
-            directions = np.array([rotate_vector(tuple(d), correction) for d in directions])
-            
+            # One matrix build + one batched matmul. This runs ~140 times per
+            # solve (20 iterations x 7 evaluations) over up to buffer_size
+            # observations; the old per-element Python rotate_vector loop cost
+            # hundreds of ms per solve inside the 30Hz server loop.
+            R = self._quat_to_matrix(correction)
+            directions = directions @ R.T
+
         v = targets - cameras
 
         # batched dot product
@@ -328,9 +342,19 @@ class Calibrator:
         
         # Blend with factor
         blended = slerp(current, new_offset, self.blend_factor)
-        
+
         self._offsets[camera_id] = normalize(blended)
-        
+
+        # Discard the observation buffer: everything in it was collected with
+        # the PREVIOUS offset applied to the rays. Solving again on that stale
+        # data would re-derive (part of) the same correction and oscillate.
+        # (The validator's correction/convergence history is intentionally
+        # kept — only the residual observations are offset-dependent, and its
+        # rolling window turns over quickly at 30Hz.)
+        buf = self._buffers.get(camera_id)
+        if buf is not None:
+            buf.clear()
+
         return True
     
     def get_offset(

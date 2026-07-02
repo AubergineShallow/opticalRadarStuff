@@ -1,3 +1,5 @@
+
+
 /**
  * OpticalRadar Data Types
  * Closely matching backend implementation conventions.
@@ -22,6 +24,7 @@ export interface Ray {
     intensity: number;     // [0, 255]
     camera_id: string;
     timestamp: number;
+    cluster_id?: string;   // owning cluster (stamped by backend, P0.6)
 }
 
 // Voxel: 3D Grid Unit
@@ -31,6 +34,7 @@ export interface Voxel {
     z: number; // ENU Center Z (Meters)
     intensity: number; // [0, 255]
     timestamp: number;
+    cluster_id?: string;  // owning cluster (stamped by backend, P0.6)
 }
 
 export enum TrackState {
@@ -38,6 +42,16 @@ export enum TrackState {
     CONFIRMED = 1,
     LOST = 2,
     DELETED = 3,
+}
+
+// Precomputed display fields (P3.2) — derived once at WebSocket receipt instead
+// of inside every table render. ENU-derived lat/lon are display approximations,
+// NOT for geodetic targeting.
+export interface TrackDisplayProps {
+    speed_ms: number;     // sqrt(vE^2 + vN^2 + vU^2)
+    heading_deg: number;  // atan2(vE, vN) normalised to [0, 360)
+    lat: number;          // ENU-derived approximation
+    lon: number;
 }
 
 export interface Track {
@@ -51,6 +65,8 @@ export interface Track {
     hit_count: number;
     confidence: number;     // [0.0, 1.0]
     predicted_next: Vector3; // Position at t+dt
+    cluster_id?: string;     // owning cluster (stamped by backend, P0.6)
+    display?: TrackDisplayProps; // precomputed at receipt (P3.2)
 }
 
 export enum NodeHealthStatus {
@@ -58,6 +74,13 @@ export enum NodeHealthStatus {
     DEGRADED = 1,
     FAILING = 2,
     OFFLINE = 3,
+}
+
+export interface SensorConfig {
+    azimuth_deg: number;
+    elevation_deg: number;
+    hfov_deg: number;
+    vfov_deg: number;
 }
 
 export interface NodeHealth {
@@ -69,6 +92,18 @@ export interface NodeHealth {
     temp_c: number;        // Celsius
     ip_address: string;
     location: Vector3;     // ENU
+    sensor_config?: SensorConfig; // optional — backend may not always send it (P3.1)
+    cluster_id?: string;          // owning cluster (P0.6)
+    display_lat?: number;         // ENU-derived approximation, precomputed (P3.2)
+    display_lon?: number;
+}
+
+// Cluster / domain topology (P3.5)
+export interface ClusterInfo {
+    cluster_id: string;
+    node_ids: string[];
+    track_count: number;
+    voxel_resolution_m: number;
 }
 
 export interface SystemStatus {
@@ -81,6 +116,7 @@ export interface SystemStatus {
 }
 
 export interface WSMessage {
-    type: 'TRACK_UPDATE' | 'VOXEL_UPDATE' | 'RAY_UPDATE' | 'NODE_UPDATE' | 'SYSTEM_STATUS';
+    type: 'TRACK_UPDATE' | 'VOXEL_UPDATE' | 'RAY_UPDATE' | 'NODE_UPDATE'
+        | 'SYSTEM_STATUS' | 'CLUSTER_UPDATE';
     payload: any;
 }

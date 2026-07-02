@@ -1,3 +1,5 @@
+
+
 """
 protocol.py
 PURPOSE: Defines how cameras talk to the main computer (Version 3).
@@ -80,19 +82,26 @@ class AnnouncePacket:
     resolution_width: int = 640
     resolution_height: int = 480
     fps: int = 30
-    
-    def pack(self) -> bytes:
-        """Pack announce packet."""
+
+    # Security: optional trailing 32-byte HMAC over the 31-byte header+payload.
+    # Announce packets carry a signature so node *registration* can be
+    # authenticated exactly like telemetry — otherwise an attacker could
+    # register/poison nodes even with security enabled (the signature field is
+    # what the server's verify path keys on).
+    signature: Optional[bytes] = None
+
+    def pack(self, include_signature: bool = False) -> bytes:
+        """Pack announce packet (31 bytes, +32 when a signature is appended)."""
         # Camera ID: 8 bytes (null-padded)
         cam_id_bytes = self.camera_id.encode('utf-8')[:8].ljust(8, b'\x00')
-        
+
         # Header-like structure
         data = struct.pack(
             '>BB', self.version, self.packet_type
         )
         data += cam_id_bytes
         data += struct.pack('>d', self.timestamp)
-        
+
         # Payload: ffHHB (float, float, ushort, ushort, uchar)
         # 4 + 4 + 2 + 2 + 1 = 13 bytes payload
         data += struct.pack(
@@ -103,24 +112,39 @@ class AnnouncePacket:
             self.resolution_height,
             self.fps
         )
-        
+
+        if include_signature and self.signature:
+            data += self.signature
+
         return data
-    
+
+    def get_data_for_signing(self) -> bytes:
+        """Header+payload bytes the HMAC is computed over (excludes signature)."""
+        return self.pack(include_signature=False)
+
     @classmethod
     def unpack(cls, data: bytes) -> 'AnnouncePacket':
         """Unpack announce packet."""
         offset = 0
         version, packet_type = struct.unpack_from('>BB', data, offset)
         offset += 2
-        
+
         camera_id = data[offset:offset+8].rstrip(b'\x00').decode('utf-8')
         offset += 8
-        
+
         timestamp, = struct.unpack_from('>d', data, offset)
         offset += 8
-        
+
         fov_h, fov_v, w, h, fps = struct.unpack_from('>ffHHB', data, offset)
-        
+        offset += 13
+
+        # Auto-detect a trailing 32-byte HMAC, mirroring TelemetryPacket.unpack:
+        # the base announce is 31 bytes, so any 32+ trailing bytes are the
+        # signature. Unsigned announces (the default) leave this None.
+        signature = None
+        if len(data) - offset >= SIGNATURE_SIZE:
+            signature = data[-SIGNATURE_SIZE:]
+
         return cls(
             version=version,
             packet_type=packet_type,
@@ -130,7 +154,8 @@ class AnnouncePacket:
             fov_vertical=fov_v,
             resolution_width=w,
             resolution_height=h,
-            fps=fps
+            fps=fps,
+            signature=signature
         )
 
 
@@ -138,8 +163,8 @@ class AnnouncePacket:
 class TelemetryPacket:
     """
     V3 Telemetry Packet from camera.
-    Header: 60 bytes
-    Body: N * 6 bytes (motion vectors)
+    Header: 61 bytes (HEADER_SIZE)
+    Body: N * 8 bytes (motion vectors, MOTION_VECTOR_SIZE)
     Signature: 32 bytes (optional, if security enabled)
     """
     # Header fields
@@ -161,7 +186,7 @@ class TelemetryPacket:
     signature: Optional[bytes] = None
     
     def pack_header(self) -> bytes:
-        """Pack 60-byte header."""
+        """Pack the 61-byte header (HEADER_SIZE)."""
         # Camera ID: 8 bytes (null-padded)
         cam_id_bytes = self.camera_id.encode('utf-8')[:8].ljust(8, b'\x00')
         
@@ -259,12 +284,16 @@ class TelemetryPacket:
             vectors.append(vec)
             offset += MOTION_VECTOR_SIZE
         
-        # Extract signature if present
+        # Auto-detect a trailing 32-byte HMAC signature: any bytes beyond
+        # header + vectors are the signature. The wire format carries no
+        # has_signature flag, so the UDP receive path could not otherwise tell
+        # a signed packet from an unsigned one and silently discarded the
+        # signature, making object-level verification always fail. (has_signature
+        # is kept for backwards compatibility but is no longer required.)
         signature = None
-        if has_signature:
-            remaining = len(data) - offset
-            if remaining >= SIGNATURE_SIZE:
-                signature = data[-SIGNATURE_SIZE:]
+        remaining = len(data) - offset
+        if remaining >= SIGNATURE_SIZE:
+            signature = data[-SIGNATURE_SIZE:]
         
         return cls(
             version=version,

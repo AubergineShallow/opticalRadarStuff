@@ -1,5 +1,7 @@
+
+
 import { create } from 'zustand';
-import { Track, Ray, Voxel, NodeHealth, SystemStatus, TrackState } from './types';
+import { Track, Ray, Voxel, NodeHealth, SystemStatus, TrackState, ClusterInfo } from './types';
 
 interface AppState {
     // Data State
@@ -8,6 +10,11 @@ interface AppState {
     voxels: Voxel[]; // Sparse array of active voxels
     nodes: Record<string, NodeHealth>;
     system: SystemStatus;
+
+    // Cluster / domain state (P3.5)
+    clusters: Record<string, ClusterInfo>;
+    activeClusterId: string | null;
+    pendingNodeIds: string[];
 
     // UI State
     selectedTrackId: string | null;
@@ -23,6 +30,10 @@ interface AppState {
     setVoxels: (voxels: Voxel[]) => void;
     updateNode: (node: NodeHealth) => void;
     updateSystemStatus: (status: SystemStatus) => void;
+
+    setClusters: (clusters: Record<string, ClusterInfo>) => void;
+    setActiveCluster: (id: string | null) => void;
+    setPendingNodes: (ids: string[]) => void;
 
     selectTrack: (id: string | null) => void;
     selectNode: (id: string | null) => void;
@@ -47,6 +58,10 @@ export const useAppStore = create<AppState>((set) => ({
     nodes: {},
     system: DEFAULT_SYSTEM_STATUS,
 
+    clusters: {},
+    activeClusterId: null,
+    pendingNodeIds: [],
+
     selectedTrackId: null,
     selectedNodeId: null,
     is3DMode: true,
@@ -55,15 +70,16 @@ export const useAppStore = create<AppState>((set) => ({
     showHistory: true,
 
     // Actions
-    setTracks: (newTracks) => set((state) => {
-        const tracks = { ...state.tracks };
+    setTracks: (newTracks) => set(() => {
+        // Full-replace: the backend sends the complete current track list for the
+        // subscribed cluster every frame, so rebuild the map from scratch. Merging
+        // into the previous map left "zombie" tracks on screen forever, because a
+        // track that disappears server-side is simply absent from later updates
+        // (no per-track DELETED event is emitted).
+        const tracks: Record<string, Track> = {};
         newTracks.forEach(t => {
-            // Explicitly handle deletions to avoid zombie tracks
-            if (t.state === TrackState.DELETED) {
-                delete tracks[t.track_id];
-            } else {
-                tracks[t.track_id] = t;
-            }
+            if (t.state === TrackState.DELETED) return;
+            tracks[t.track_id] = t;
         });
         return { tracks };
     }),
@@ -77,6 +93,17 @@ export const useAppStore = create<AppState>((set) => ({
     })),
 
     updateSystemStatus: (status) => set({ system: status }),
+
+    setClusters: (clusters) => set((state) => {
+        // Auto-select the first cluster as the active domain if none is chosen yet.
+        const ids = Object.keys(clusters);
+        const activeClusterId = state.activeClusterId ?? (ids.length > 0 ? ids[0] : null);
+        return { clusters, activeClusterId };
+    }),
+
+    setActiveCluster: (id) => set({ activeClusterId: id }),
+
+    setPendingNodes: (ids) => set({ pendingNodeIds: ids }),
 
     selectTrack: (id) => set({ selectedTrackId: id }),
 
@@ -96,6 +123,9 @@ export const useAppStore = create<AppState>((set) => ({
         rays: [],
         voxels: [],
         nodes: {},
-        system: DEFAULT_SYSTEM_STATUS
+        system: DEFAULT_SYSTEM_STATUS,
+        clusters: {},
+        activeClusterId: null,
+        pendingNodeIds: []
     })
 }));

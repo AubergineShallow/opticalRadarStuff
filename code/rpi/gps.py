@@ -1,3 +1,5 @@
+
+
 """
 gps.py
 PURPOSE: Read GPS data from GPS module.
@@ -6,7 +8,7 @@ PURPOSE: Read GPS data from GPS module.
 import time
 import threading
 from typing import Optional, Tuple
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 
 @dataclass
@@ -225,21 +227,34 @@ class GPSReader:
         return result
     
     def get_fix(self) -> Optional[GPSFix]:
-        """Get latest GPS fix."""
+        """Get latest GPS fix (a snapshot copy).
+
+        The reader thread mutates the internal record in place (RMC updates
+        speed/heading on the existing object), so handing out the live
+        reference let a caller's fix change under it mid-use.
+        """
         with self._lock:
-            return self._latest_fix
-    
+            if self._latest_fix is None:
+                return None
+            return replace(self._latest_fix)
+
     def get_position(self) -> Optional[Tuple[float, float, float]]:
         """Get latest position (lat, lon, alt)."""
         fix = self.get_fix()
         if fix:
             return (fix.latitude, fix.longitude, fix.altitude)
         return None
-    
-    def has_fix(self) -> bool:
-        """Check if we have a valid GPS fix."""
+
+    def has_fix(self, max_age_sec: float = 10.0) -> bool:
+        """Check for a valid AND fresh GPS fix.
+
+        A fix used to stay "valid" forever after signal loss; now it expires
+        once no position sentence has been parsed for max_age_sec.
+        """
         fix = self.get_fix()
-        return fix is not None and fix.fix_quality > 0
+        if fix is None or fix.fix_quality <= 0:
+            return False
+        return (time.time() - fix.timestamp) <= max_age_sec
     
     @property
     def is_running(self) -> bool:

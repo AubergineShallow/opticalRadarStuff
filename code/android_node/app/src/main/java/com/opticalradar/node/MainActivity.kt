@@ -1,29 +1,53 @@
+
+
 package com.opticalradar.node
 
 import android.Manifest
+import android.content.ComponentName
+import android.content.Context
 import android.content.Intent
+import android.content.ServiceConnection
 import android.content.pm.PackageManager
 import android.os.Bundle
+import android.os.IBinder
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.camera.core.CameraSelector
-import androidx.camera.core.Preview
-import androidx.camera.lifecycle.ProcessCameraProvider
 import androidx.camera.view.PreviewView
 import androidx.compose.foundation.layout.*
 import androidx.compose.material3.*
 import androidx.compose.runtime.*
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.platform.LocalContext
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.core.content.ContextCompat
+import kotlinx.coroutines.flow.MutableStateFlow
 
+@OptIn(ExperimentalMaterial3Api::class)
 class MainActivity : ComponentActivity() {
 
-    private var cameraProvider: ProcessCameraProvider? = null
+    // Backed by Compose state so changes to the binding trigger recomposition
+    private var radarServiceState = mutableStateOf<RadarService?>(null)
+    private var serviceBound = false
+    private var previewView: PreviewView? = null
+
+    private val serviceConnection = object : ServiceConnection {
+        override fun onServiceConnected(name: ComponentName?, binder: IBinder?) {
+            val service = (binder as RadarService.RadarBinder).getService()
+            radarServiceState.value = service
+            serviceBound = true
+
+            // Attach the service's Preview use case to our PreviewView
+            previewView?.let { pv ->
+                service.preview?.setSurfaceProvider(pv.surfaceProvider)
+            }
+        }
+
+        override fun onServiceDisconnected(name: ComponentName?) {
+            radarServiceState.value = null
+            serviceBound = false
+        }
+    }
 
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
@@ -40,12 +64,16 @@ class MainActivity : ComponentActivity() {
 
         setContent {
             var serverIp by remember { mutableStateOf("192.168.1.100") }
-            var nodeId by remember { mutableStateOf("5") }
+            var cameraId by remember { mutableStateOf("android_01") }
             var isRunning by remember { mutableStateOf(false) }
 
-            // Simulating stats for now (in full app, service would broadcast these back to UI)
-            val tracksFound by remember { mutableStateOf(0) }
-            val packetsSent by remember { mutableStateOf(0) }
+            // Observe the bound service as Compose state
+            val service = radarServiceState.value
+
+            // Fallback flow so collectAsState always has something to collect from
+            val zeroFlow = remember { MutableStateFlow(0) }
+            val tracksFound by (service?.tracksFound ?: zeroFlow).collectAsState()
+            val packetsSent by (service?.packetsSent ?: zeroFlow).collectAsState()
 
             MaterialTheme {
                 Surface(
@@ -57,13 +85,13 @@ class MainActivity : ComponentActivity() {
 
                         Spacer(modifier = Modifier.height(16.dp))
 
-                        // Camera Preview Window
+                        // Camera Preview Window — shows the service's Preview use case
                         Box(
                             modifier = Modifier
                                 .fillMaxWidth()
                                 .height(300.dp)
                         ) {
-                            CameraPreviewView()
+                            ServiceCameraPreview()
                         }
 
                         Spacer(modifier = Modifier.height(16.dp))
@@ -85,9 +113,9 @@ class MainActivity : ComponentActivity() {
                         Spacer(modifier = Modifier.height(8.dp))
 
                         OutlinedTextField(
-                            value = nodeId,
-                            onValueChange = { nodeId = it },
-                            label = { Text("Node ID") },
+                            value = cameraId,
+                            onValueChange = { cameraId = it },
+                            label = { Text("Camera ID") },
                             modifier = Modifier.fillMaxWidth()
                         )
 
@@ -99,11 +127,23 @@ class MainActivity : ComponentActivity() {
                                     val intent = Intent(this@MainActivity, RadarService::class.java).apply {
                                         putExtra("SERVER_IP", serverIp)
                                         putExtra("SERVER_PORT", 5005)
-                                        putExtra("NODE_ID", nodeId.toIntOrNull() ?: 1)
+                                        putExtra("CAMERA_ID", cameraId)
                                     }
                                     ContextCompat.startForegroundService(this@MainActivity, intent)
+
+                                    // Bind so we can show the preview & collect stats
+                                    bindService(
+                                        Intent(this@MainActivity, RadarService::class.java),
+                                        serviceConnection,
+                                        Context.BIND_AUTO_CREATE
+                                    )
                                     isRunning = true
                                 } else {
+                                    if (serviceBound) {
+                                        unbindService(serviceConnection)
+                                        serviceBound = false
+                                        radarServiceState.value = null
+                                    }
                                     stopService(Intent(this@MainActivity, RadarService::class.java))
                                     isRunning = false
                                 }
@@ -121,44 +161,53 @@ class MainActivity : ComponentActivity() {
         }
     }
 
-    @Composable
-    fun CameraPreviewView() {
-        val context = LocalContext.current
-        val lifecycleOwner = LocalLifecycleOwner.current
+    override fun onStart() {
+        super.onStart()
+        // Re-attach the preview surface when the Activity comes back to the foreground
+        if (serviceBound) {
+            previewView?.let { pv ->
+                radarServiceState.value?.preview?.setSurfaceProvider(pv.surfaceProvider)
+            }
+        }
+    }
 
+    override fun onStop() {
+        super.onStop()
+        // Detach the preview surface — detection (ImageAnalysis) is unaffected
+        radarServiceState.value?.preview?.setSurfaceProvider(null)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        if (serviceBound) {
+            unbindService(serviceConnection)
+            serviceBound = false
+        }
+    }
+
+    /**
+     * Composable that creates a [PreviewView] and stashes a reference so the
+     * [ServiceConnection] callback can attach the service's Preview use case.
+     *
+     * This does NOT create its own ProcessCameraProvider — the service owns the
+     * camera. Two components binding the same physical camera will fight each
+     * other; this approach avoids that.
+     */
+    @Composable
+    fun ServiceCameraPreview() {
         AndroidView(
             factory = { ctx ->
                 PreviewView(ctx).apply {
                     scaleType = PreviewView.ScaleType.FILL_CENTER
                     implementationMode = PreviewView.ImplementationMode.COMPATIBLE
+                    previewView = this
+
+                    // If the service is already bound, attach immediately
+                    radarServiceState.value?.preview?.setSurfaceProvider(surfaceProvider)
                 }
             },
-            modifier = Modifier.fillMaxSize(),
-            update = { previewView ->
-                val cameraProviderFuture = ProcessCameraProvider.getInstance(context)
-                cameraProviderFuture.addListener({
-                    cameraProvider = cameraProviderFuture.get()
-                    bindCameraUseCases(previewView, lifecycleOwner)
-                }, ContextCompat.getMainExecutor(context))
-            }
+            modifier = Modifier.fillMaxSize()
         )
-    }
-
-    private fun bindCameraUseCases(previewView: PreviewView, lifecycleOwner: androidx.lifecycle.LifecycleOwner) {
-        val provider = cameraProvider ?: return
-        provider.unbindAll()
-
-        val preview = Preview.Builder().build().also {
-            it.setSurfaceProvider(previewView.surfaceProvider)
-        }
-
-        val cameraSelector = CameraSelector.DEFAULT_BACK_CAMERA
-
-        try {
-            provider.bindToLifecycle(lifecycleOwner, cameraSelector, preview)
-        } catch (exc: Exception) {
-            exc.printStackTrace()
-        }
     }
 
     private fun checkPermissions() {

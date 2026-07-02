@@ -1,3 +1,5 @@
+
+
 """
 sim_node.py
 PURPOSE: Simulated camera node for testing without real hardware.
@@ -17,7 +19,8 @@ if _parent not in sys.path:
     sys.path.insert(0, _parent)
 
 from common.constants import UDP_PORT, TARGET_FPS, PROTOCOL_VERSION
-from common.protocol import TelemetryPacket, MotionVector as ProtocolMotionVector
+from common.protocol import TelemetryPacket, AnnouncePacket, MotionVector as ProtocolMotionVector
+from math_utils.geo import enu_to_wgs84
 
 from .sim_utils import enu_to_azel, add_noise
 
@@ -98,9 +101,30 @@ class SimNode:
         try:
             self._socket = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
             self._running = True
+            # Announce so the server registers this node and auto-assigns it to
+            # a cluster. Without it, every telemetry packet is parked in the
+            # pending pool and never processed (rpi_node announces; sim didn't).
+            self.send_announce()
             return True
         except Exception as e:
             print(f"SimNode start failed: {e}")
+            return False
+
+    def send_announce(self) -> bool:
+        """Send an announce packet (registration + optics)."""
+        if not self._socket:
+            return False
+        try:
+            packet = AnnouncePacket(
+                camera_id=self.config.camera_id,
+                timestamp=time.time(),
+                fov_horizontal=self.config.fov_horizontal,
+                fov_vertical=self.config.fov_vertical,
+            )
+            self._socket.sendto(packet.pack(), (self.server_address, self.server_port))
+            return True
+        except Exception as e:
+            print(f"SimNode announce failed: {e}")
             return False
     
     def stop(self) -> None:
@@ -224,21 +248,27 @@ class SimNode:
         if not self.start():
             print("Failed to start SimNode")
             return
-        
+
         frame_time = 1.0 / target_fps
         start_time = time.time()
-        
+        last_announce = time.time()
+
         while self._running and (time.time() - start_time) < duration:
             frame_start = time.time()
-            
+
+            # Periodic re-announce (matches rpi_node's 5s cadence).
+            if time.time() - last_announce > 5.0:
+                self.send_announce()
+                last_announce = time.time()
+
             self.update_targets(frame_time)
             self.process_frame()
-            
+
             elapsed = time.time() - frame_start
             sleep_time = frame_time - elapsed
             if sleep_time > 0:
                 time.sleep(sleep_time)
-        
+
         self.stop()
 
 
@@ -259,7 +289,31 @@ def create_demo_simulation(
         List of SimNode instances
     """
     nodes = []
-    
+
+    # ENU reference origin: MUST match ReferenceConfig / the frontend
+    # COORDINATE_ORIGIN so the server converts camera GPS back to the same
+    # ENU positions the simulation used.
+    ref_lat, ref_lon, ref_alt = 37.7749, -122.4194, 0.0
+
+    # Generate the shared target set ONCE. The old code created new random
+    # targets inside the per-camera loop, so every camera saw different
+    # targets and multi-camera triangulation could never occur.
+    shared_targets = []
+    for j in range(num_targets):
+        shared_targets.append((
+            f"target{j+1:02d}",
+            np.array([
+                np.random.uniform(-arena_size/2, arena_size/2),
+                np.random.uniform(-arena_size/2, arena_size/2),
+                np.random.uniform(20, 50)
+            ]),
+            np.array([
+                np.random.uniform(-5, 5),
+                np.random.uniform(-5, 5),
+                0.0
+            ]),
+        ))
+
     # Place cameras in a circle
     for i in range(num_cameras):
         angle = (2 * math.pi * i) / num_cameras
@@ -268,36 +322,33 @@ def create_demo_simulation(
             arena_size * math.sin(angle),
             2.0  # 2m height
         ])
-        
+
+        # Proper inverse ENU->WGS84 conversion. The old `pos * 0.00001` degree
+        # shortcut was off by ~11% in latitude and ~26% in longitude (no
+        # cos(lat) term), so the server-computed camera positions disagreed
+        # with the geometry used to synthesise the detection angles.
+        lat, lon, alt = enu_to_wgs84(
+            pos[0], pos[1], pos[2], ref_lat, ref_lon, ref_alt)
+
         config = SimCameraConfig(
             camera_id=f"sim{i+1:02d}",
             position=pos,
-            latitude=37.7749 + pos[1] * 0.00001,
-            longitude=-122.4194 + pos[0] * 0.00001,
-            altitude=10.0 + pos[2]
+            latitude=lat,
+            longitude=lon,
+            altitude=alt
         )
-        
+
         node = SimNode(config)
-        
-        # Add shared targets to all nodes
-        for j in range(num_targets):
-            target_pos = np.array([
-                np.random.uniform(-arena_size/2, arena_size/2),
-                np.random.uniform(-arena_size/2, arena_size/2),
-                np.random.uniform(20, 50)
-            ])
-            target_vel = np.array([
-                np.random.uniform(-5, 5),
-                np.random.uniform(-5, 5),
-                0
-            ])
-            
+
+        # Every node observes the SAME targets (independent per-node state so
+        # each node's update_targets() integration stays self-contained).
+        for target_id, target_pos, target_vel in shared_targets:
             node.add_target(SimTarget(
-                target_id=f"target{j+1:02d}",
+                target_id=target_id,
                 position=target_pos.copy(),
                 velocity=target_vel.copy()
             ))
-        
+
         nodes.append(node)
-    
+
     return nodes

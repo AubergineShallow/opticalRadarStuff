@@ -1,3 +1,5 @@
+
+
 """
 key_manager.py
 PURPOSE: Manage shared secrets for authentication across the system.
@@ -5,11 +7,21 @@ PURPOSE: Manage shared secrets for authentication across the system.
 
 import os
 import base64
+import hashlib
 import secrets
 import time
 from typing import List, Optional, Dict
 from dataclasses import dataclass, field
 from pathlib import Path
+
+
+def key_fingerprint(key: bytes) -> str:
+    """Short, non-secret identifier for a key (hash-derived).
+
+    Never expose raw key bytes as an id — the old scheme base64-encoded the
+    first 4 bytes of the key itself, leaking key material into logs.
+    """
+    return hashlib.sha256(key).hexdigest()[:8]
 
 
 @dataclass
@@ -178,8 +190,22 @@ class KeyManager:
     def all_valid_keys(self) -> List[bytes]:
         """Get all non-expired keys."""
         now = time.time()
-        return [km.key for km in self._keys 
+        return [km.key for km in self._keys
                 if km.expires_at is None or km.expires_at > now]
+
+    def get_active_key(self, node_id: Optional[str] = None) -> Optional[bytes]:
+        """
+        Active (primary, non-expired) key for a node.
+
+        node_id is accepted for a future per-node key model; the current
+        implementation uses a single shared key for all nodes (P5.1).
+        """
+        return self.primary_key
+
+    def get_valid_keys(self, node_id: Optional[str] = None) -> List[bytes]:
+        """All keys valid for verification right now (covers the rotation grace
+        window). node_id is accepted for the future per-node model (P5.1)."""
+        return self.all_valid_keys
     
     def generate_key(self, length: int = 32) -> bytes:
         """
@@ -217,16 +243,16 @@ class KeyManager:
         for km in self._keys:
             if km.expires_at is None:
                 km.expires_at = expires_at
-                old_key_id = base64.b64encode(km.key[:4]).decode('ascii')
-        
+                old_key_id = key_fingerprint(km.key)
+
         # Add new key at front (primary)
         self._keys.insert(0, KeyMetadata(
             key=new_key,
             created_at=now,
             comment="Rotated key"
         ))
-        
-        new_key_id = base64.b64encode(new_key[:4]).decode('ascii')
+
+        new_key_id = key_fingerprint(new_key)
         
         return KeyRotationStatus(
             old_key_id=old_key_id,
@@ -267,11 +293,15 @@ class KeyManager:
             True if successful
         """
         import subprocess
-        
+        import shlex
+
         key_b64 = base64.b64encode(key).decode('ascii')
-        
-        # Create remote file with secure permissions
-        cmd = f'echo "{key_b64}" > {remote_path} && chmod 600 {remote_path}'
+
+        # Create remote file with secure permissions. remote_path is quoted so
+        # a caller-supplied path can't smuggle shell metacharacters into the
+        # remote command (key_b64 is base64, inherently shell-safe).
+        quoted = shlex.quote(remote_path)
+        cmd = f'echo "{key_b64}" > {quoted} && chmod 600 {quoted}'
         
         try:
             result = subprocess.run(

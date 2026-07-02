@@ -1,3 +1,5 @@
+
+
 """
 quaternion.py
 PURPOSE: Math for describing rotations in 3D space.
@@ -193,15 +195,21 @@ def to_axis_angle(q: Tuple[float, float, float, float]) -> Tuple[Tuple[float, fl
     """
     q = normalize(q)
     w, x, y, z = q
-    
-    angle = 2 * math.acos(min(1.0, abs(w)))
-    
+
+    # Canonicalise to the w >= 0 hemisphere (q and -q are the same rotation).
+    # Using abs(w) for the angle while keeping the raw x/y/z flipped the axis
+    # sign for negative-w quaternions, returning a different rotation.
+    if w < 0:
+        w, x, y, z = -w, -x, -y, -z
+
+    angle = 2 * math.acos(min(1.0, w))
+
     sin_half = math.sin(angle / 2)
     if sin_half < 1e-10:
         return ((1.0, 0.0, 0.0), 0.0)
-    
+
     axis = (x / sin_half, y / sin_half, z / sin_half)
-    
+
     return (axis, math.degrees(angle))
 
 

@@ -1,3 +1,5 @@
+
+
 import React, { useMemo } from 'react';
 import VisualizationMap from './components/visualization/Map';
 import HUD from './components/HUD';
@@ -16,7 +18,7 @@ export default function App() {
   }, []);
 
   // Initialize WebSocket connection if not in mock mode
-  const { isConnected } = useWebSocket(Env.WS_URL, !shouldUseMock);
+  const { isConnected, sendCommand } = useWebSocket(Env.WS_URL, !shouldUseMock);
 
   // Initialize Mock Data if in mock mode
   useMockData(shouldUseMock);
@@ -30,7 +32,7 @@ export default function App() {
 
       {/* Interface Layer - Pointer events are handled within HUD components */}
       <div className="absolute inset-0 z-10 pointer-events-none">
-        <HUD />
+        <HUD sendCommand={sendCommand} />
 
         {/* Connection Status Indicator */}
         {!shouldUseMock && (
