@@ -1,0 +1,12 @@
+
+# Optional dependencies for the LoRa / Meshtastic ingest gateway.
+# The server runs fine without these; they are only imported (lazily) when
+# lora.enabled is set and the corresponding transport is selected.
+#
+#   install:  pip install -r requirements-lora.txt
+
+# Meshtastic transport (PRIMARY): talk to a Meshtastic radio over USB/TCP/BLE.
+meshtastic>=2.3.0
+
+# Raw SX127x serial-bridge transport (alternate), and the RPi LoRa HAT path.
+pyserial>=3.5

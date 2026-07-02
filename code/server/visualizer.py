@@ -1,3 +1,5 @@
+
+
 """
 visualizer.py
 PURPOSE: 3D visualization of voxel grid and detections.
@@ -42,23 +44,35 @@ class Visualizer:
     def __init__(self, config: Optional[VisualizerConfig] = None):
         """
         Initialize visualizer.
-        
+
         Args:
             config: Visualization config
         """
         self.config = config or VisualizerConfig()
-        
+
+        # Always initialise every attribute, even when matplotlib is missing —
+        # close() and the update_* buffers are called unconditionally by
+        # server_main, and an early return here used to leave _fig/_ax unset
+        # (AttributeError on shutdown).
+        self._fig = None
+        self._ax = None
+
+        # Track history for trajectories
+        self._track_history: dict = {}
+
+        # Per-frame state buffered by the update_* methods and consumed by
+        # render() (server_main pushes rays/detections/tracks as they are
+        # produced and renders once per loop).
+        self._latest_detections: list = []
+        self._latest_tracks: list = []
+        self._latest_rays: list = []
+
         if not HAS_MATPLOTLIB:
             print("Warning: matplotlib not available, visualization disabled")
             self._enabled = False
             return
-        
+
         self._enabled = True
-        self._fig = None
-        self._ax = None
-        
-        # Track history for trajectories
-        self._track_history: dict = {}
     
     def setup(self) -> None:
         """Set up the visualization window."""
@@ -79,7 +93,8 @@ class Visualizer:
         detections: List[np.ndarray],
         camera_positions: Optional[List[Tuple[str, np.ndarray]]] = None,
         tracks: Optional[List[Tuple[int, np.ndarray]]] = None,
-        hot_voxels: Optional[List[Tuple[np.ndarray, float]]] = None
+        hot_voxels: Optional[List[Tuple[np.ndarray, float]]] = None,
+        rays: Optional[list] = None
     ) -> None:
         """
         Update visualization.
@@ -118,6 +133,17 @@ class Visualizer:
                 c='blue', s=100, marker='o', label='Detections'
             )
         
+        # Draw sensor rays (short segments from camera origins)
+        if rays and self.config.show_rays:
+            for ray in rays:
+                o = np.asarray(ray.origin, dtype=float)
+                d = np.asarray(ray.direction, dtype=float)
+                end = o + d * 150.0
+                self._ax.plot(
+                    [o[0], end[0]], [o[1], end[1]], [o[2], end[2]],
+                    'c-', alpha=0.2, linewidth=0.5
+                )
+
         # Draw cameras
         if camera_positions and self.config.show_cameras:
             for cam_id, pos in camera_positions:
@@ -186,6 +212,41 @@ class Visualizer:
         self._ax.set_ylim3d([center[1] - radius, center[1] + radius])
         self._ax.set_zlim3d([center[2] - radius, center[2] + radius])
     
+    # ------------------------------------------------------------------ #
+    # Per-frame buffering API used by server_main                         #
+    # ------------------------------------------------------------------ #
+    def update_rays(self, rays: list) -> None:
+        """Buffer this packet's sensor rays for the next render()."""
+        self._latest_rays = list(rays) if rays else []
+
+    def update_detections(self, detections: List[np.ndarray]) -> None:
+        """Buffer this frame's detection centroids for the next render()."""
+        self._latest_detections = list(detections) if detections else []
+
+    def update_tracks(self, tracks: list) -> None:
+        """Buffer this frame's Track objects for the next render()."""
+        self._latest_tracks = list(tracks) if tracks else []
+
+    def render(self) -> None:
+        """Draw the buffered frame state. Lazily opens the window on first call."""
+        if not self._enabled:
+            return
+        if self._ax is None:
+            self.setup()
+
+        # Track objects -> (track_id, position) tuples update() expects.
+        track_tuples = []
+        for t in self._latest_tracks:
+            track_id = getattr(t, 'track_id', getattr(t, 'id', 0))
+            pos = np.asarray(getattr(t, 'position', (0.0, 0.0, 0.0)), dtype=float)
+            track_tuples.append((track_id, pos))
+
+        self.update(
+            self._latest_detections,
+            tracks=track_tuples,
+            rays=self._latest_rays,
+        )
+
     def close(self) -> None:
         """Close visualization window."""
         if self._fig:

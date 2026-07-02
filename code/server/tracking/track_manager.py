@@ -1,3 +1,5 @@
+
+
 """
 track_manager.py
 PURPOSE: Manage track lifecycle (creation, confirmation, deletion).
@@ -73,21 +75,24 @@ class TrackManager:
         max_misses_to_delete: int = 30,
         max_tracks: int = 100,
         q_process_noise: float = 0.1,
-        r_measurement_noise: float = 2.0
+        r_measurement_noise: float = 2.0,
+        misses_to_lost: int = 5
     ):
         """
         Initialize track manager.
-        
+
         Args:
             min_hits_to_confirm: Hits needed to confirm track
             max_misses_to_delete: Misses before deletion
             max_tracks: Maximum number of tracks
             q_process_noise: Kalman filter process noise
             r_measurement_noise: Kalman filter measurement noise
+            misses_to_lost: Consecutive misses before a CONFIRMED track is LOST
         """
         self.min_hits = min_hits_to_confirm
         self.max_misses = max_misses_to_delete
         self.max_tracks = max_tracks
+        self.misses_to_lost = misses_to_lost
         
         self._tracks: Dict[int, Track] = {}
         self._next_id: int = 1
@@ -121,29 +126,33 @@ class TrackManager:
         self,
         position: np.ndarray,
         class_id: int = 0,
-        confidence: float = 1.0
+        confidence: float = 1.0,
+        measurement_covariance: Optional[np.ndarray] = None
     ) -> Track:
         """
         Create new tentative track.
-        
+
         Args:
             position: Initial position [x, y, z]
             class_id: Object class
             confidence: Detection confidence
-        
+            measurement_covariance: Optional 3x3 positional covariance for the
+                seeding detection (triangulation geometry). Seeds initial P.
+
         Returns:
             New track
         """
         # Enforce max tracks
         if len(self._tracks) >= self.max_tracks:
             self._prune_oldest()
-        
+
         now = time.time()
-        
+
         track = Track(
             track_id=self._next_id,
             state=TrackState.TENTATIVE,
-            kalman_state=self._kalman.initialize(position),
+            kalman_state=self._kalman.initialize(
+                position, measurement_covariance=measurement_covariance),
             hits=1,
             misses=0,
             age=1,
@@ -164,7 +173,8 @@ class TrackManager:
         measurement: np.ndarray,
         dt: float,
         class_id: Optional[int] = None,
-        confidence: Optional[float] = None
+        confidence: Optional[float] = None,
+        measurement_covariance: Optional[np.ndarray] = None
     ) -> Optional[Track]:
         """
         Update track with new detection.
@@ -182,11 +192,15 @@ class TrackManager:
         track = self._tracks.get(track_id)
         if not track or track.state == TrackState.DELETED:
             return None
-        
-        # Kalman predict + update
-        predicted = self._kalman.predict(track.kalman_state, dt)
-        updated, _ = self._kalman.update(predicted, measurement)
-        
+
+        # The caller (Tracker.update) already advanced this track to the current
+        # frame via predict_all_active(dt), and used that predicted position for
+        # association. Fuse the measurement into that predicted state directly.
+        # Predicting again here would advance the track by 2*dt and add process
+        # noise twice, biasing the estimate forward and inflating covariance.
+        updated, _ = self._kalman.update(
+            track.kalman_state, measurement, R=measurement_covariance)
+
         track.kalman_state = updated
         track.hits += 1
         track.misses = 0
@@ -227,6 +241,38 @@ class TrackManager:
         
         return track
     
+    def predict_all_active(self, dt: float) -> List[Track]:
+        """
+        Predict every active track forward by dt in one vectorized call.
+
+        Equivalent to calling predict_track() on each active track, but
+        avoids both the repeated dict lookups and, more importantly, the
+        per-track reconstruction of the (shared, dt-only-dependent)
+        Kalman F/Q matrices and small matmuls -- those get batched into
+        one call via KalmanFilter.predict_batch() instead of running once
+        per track, every frame, up to max_tracks times.
+
+        Args:
+            dt: Time step, shared across all active tracks this frame
+
+        Returns:
+            The active tracks (now predicted forward), same objects as
+            self.active_tracks would return.
+        """
+        tracks = self.active_tracks
+        if not tracks:
+            return []
+
+        predicted_states = self._kalman.predict_batch(
+            [t.kalman_state for t in tracks], dt
+        )
+
+        for track, state in zip(tracks, predicted_states):
+            track.kalman_state = state
+            track.age += 1
+
+        return tracks
+
     def mark_missed(self, track_id: int) -> Optional[Track]:
         """
         Mark track as missed (no detection this frame).
@@ -245,7 +291,7 @@ class TrackManager:
         
         # State transitions
         if track.state == TrackState.CONFIRMED:
-            if track.misses >= 5:  # Lost threshold
+            if track.misses >= self.misses_to_lost:
                 track.state = TrackState.LOST
         
         if track.misses >= self.max_misses:
@@ -277,13 +323,23 @@ class TrackManager:
         return len(deleted_ids)
     
     def _prune_oldest(self) -> None:
-        """Remove oldest tentative track to make room."""
-        tentative = [t for t in self._tracks.values() 
-                     if t.state == TrackState.TENTATIVE]
-        
-        if tentative:
-            oldest = min(tentative, key=lambda t: t.created_at)
-            del self._tracks[oldest.track_id]
+        """Evict one track to make room, cheapest casualty first.
+
+        Preference order: oldest TENTATIVE, else oldest LOST, else the
+        longest-unseen track of any state. The old version only pruned
+        tentative tracks, so once everything was confirmed the max_tracks cap
+        stopped being enforced and the map grew without bound.
+        """
+        for state in (TrackState.TENTATIVE, TrackState.LOST):
+            candidates = [t for t in self._tracks.values() if t.state == state]
+            if candidates:
+                oldest = min(candidates, key=lambda t: t.created_at)
+                del self._tracks[oldest.track_id]
+                return
+
+        if self._tracks:
+            stalest = min(self._tracks.values(), key=lambda t: t.last_update)
+            del self._tracks[stalest.track_id]
     
     def get_predicted_positions(self, dt: float = 0.0) -> Dict[int, np.ndarray]:
         """

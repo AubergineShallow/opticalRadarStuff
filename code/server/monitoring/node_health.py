@@ -1,3 +1,5 @@
+
+
 """
 node_health.py
 PURPOSE: Track health status of camera nodes.
@@ -123,23 +125,30 @@ class NodeHealthMonitor:
     def __init__(
         self,
         offline_timeout_sec: float = 30.0,
-        alert_callback: Optional[callable] = None
+        alert_callback: Optional[callable] = None,
+        max_nodes: int = 1024
     ):
         """
         Initialize health monitor.
-        
+
         Args:
             offline_timeout_sec: Seconds before node considered offline
             alert_callback: Function to call on status changes
+            max_nodes: Cap on tracked node records. Telemetry is recorded here
+                BEFORE cluster-assignment filtering, so without a cap a flood
+                of unique camera_ids grows this map without limit.
         """
         self._nodes: Dict[str, NodeHealthRecord] = {}
         self.offline_timeout = offline_timeout_sec
+        self.max_nodes = max_nodes
         self._alert_callback = alert_callback
         self._previous_status: Dict[str, NodeStatus] = {}
     
     def update_node_config(self, node_id: str, config: Dict) -> None:
         """Update configuration for a node."""
         if node_id not in self._nodes:
+            if len(self._nodes) >= self.max_nodes:
+                return
             self._nodes[node_id] = NodeHealthRecord(
                 node_id=node_id,
                 offline_timeout_sec=self.offline_timeout
@@ -163,13 +172,17 @@ class NodeHealthMonitor:
             health_flags: Health flags from packet
         """
         receive_time = time.time()
-        
+
         if node_id not in self._nodes:
+            if len(self._nodes) >= self.max_nodes:
+                # Registry full: drop stats for brand-new ids rather than
+                # letting a camera_id flood grow the map without bound.
+                return
             self._nodes[node_id] = NodeHealthRecord(
                 node_id=node_id,
                 offline_timeout_sec=self.offline_timeout
             )
-        
+
         self._nodes[node_id].update(
             packet_timestamp,
             sequence,

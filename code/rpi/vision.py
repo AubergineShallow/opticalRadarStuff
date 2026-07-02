@@ -1,3 +1,5 @@
+
+
 """
 vision.py
 PURPOSE: Camera capture and motion detection for Raspberry Pi.
@@ -16,6 +18,7 @@ class MotionVector:
     elevation: float  # Degrees [-90, 90]
     intensity: int  # [0, 255]
     class_id: int = 0  # Object class
+    angular_size: float = 0.0  # Degrees [0, 180] — detection's apparent size
 
 
 @dataclass

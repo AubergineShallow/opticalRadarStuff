@@ -1,3 +1,5 @@
+
+
 """
 esp32_stub.py
 PURPOSE: Python stub for ESP32 communication and coordination.
@@ -21,6 +23,12 @@ class ESP32Config:
     server_port: int
     frame_rate: int = 15
     min_pixels: int = 50
+    # Static pose for the simulated node (a real ESP32 gets this from GNSS).
+    # Defaults sit next to the SF ENU reference origin so rays land in-grid.
+    latitude: float = 37.7749
+    longitude: float = -122.4194
+    altitude: float = 10.0
+    orientation: Tuple[float, float, float, float] = (1.0, 0.0, 0.0, 0.0)
 
 
 @dataclass
@@ -45,7 +53,9 @@ class ESP32Stub:
     Real ESP32 code would be in C++ (see pseudocode/esp32/esp32_main.txt)
     """
     
-    # Packet format: 
+    # LEGACY packet format (kept only for parse_packet compatibility with old
+    # captures). No server component ever parsed this on the wire; the stub
+    # now transmits real V3 TelemetryPackets (common.protocol) instead.
     #   version(1) + node_id(2) + timestamp(4) + sequence(4) +
     #   azimuth(2) + elevation(2) + intensity(1) + health(1) = 17 bytes
     PACKET_FORMAT = "<BHIIhhBB"
@@ -88,42 +98,47 @@ class ESP32Stub:
         health: int = 0x07
     ) -> bool:
         """
-        Send detection packet to server.
-        
+        Send a detection to the server as a V3 TelemetryPacket.
+
+        The old 17-byte custom format was never parsed by any server
+        component — every stub detection was silently dropped on arrival.
+
         Args:
             azimuth: Detection azimuth (degrees)
             elevation: Detection elevation (degrees)
             intensity: Detection intensity (0-255)
             health: Health flags
-        
+
         Returns:
             True if sent
         """
         if not self._socket:
             return False
-        
-        # Scale angles to int16
-        az_scaled = int((azimuth % 360) / 360 * 32767)
-        el_scaled = int(elevation * 100)  # Centidegrees
-        
-        # Pack data
-        data = struct.pack(
-            self.PACKET_FORMAT,
-            3,  # Version 3
-            int(self.config.node_id[-2:]) if self.config.node_id[-2:].isdigit() else 0,
-            int(time.time()) & 0xFFFFFFFF,
-            self._sequence,
-            az_scaled,
-            el_scaled,
-            intensity,
-            health
+
+        from common.protocol import TelemetryPacket, MotionVector
+
+        packet = TelemetryPacket(
+            camera_id=self.config.node_id,
+            sequence_number=self._sequence,
+            timestamp=time.time(),
+            latitude=self.config.latitude,
+            longitude=self.config.longitude,
+            altitude=self.config.altitude,
+            orientation=self.config.orientation,
+            health_flags=health,
+            vectors=[MotionVector(
+                azimuth=azimuth % 360.0,
+                elevation=elevation,
+                intensity=intensity,
+                class_id=0,
+            )],
         )
-        
+
         self._sequence = (self._sequence + 1) & 0xFFFFFFFF
-        
+
         try:
             self._socket.sendto(
-                data,
+                packet.pack(),
                 (self.config.server_address, self.config.server_port)
             )
             return True
@@ -178,7 +193,9 @@ def main():
     parser.add_argument("--id", "-i", default="esp01", help="Node ID")
     parser.add_argument("--server", "-s", default="127.0.0.1", help="Server address")
     parser.add_argument("--port", "-p", type=int, default=UDP_PORT, help="Server port")
-    
+    parser.add_argument("--spec-file", default=None,
+                        help="Path to node optics spec JSON (default: config/node_specs.json)")
+
     args = parser.parse_args()
     
     config = ESP32Config(
@@ -196,12 +213,19 @@ def main():
         return
         
     print(f"Sending to {args.server}:{args.port}")
-    
-    # Constants for ESP32-CAM (OV2640)
-    FOV_H = 66.0
-    FOV_V = 50.0
-    RES_W = 800
-    RES_H = 600
+
+    # Optical spec is provisioned in config/node_specs.json (keyed by node id),
+    # NOT hardcoded here: an ESP32-CAM cannot read its lens FOV back in software,
+    # so it must be declared in a file. Falls back to the file's _default entry,
+    # then a built-in default, if this node id is absent.
+    from common.node_specs import load_node_spec
+    spec = load_node_spec(config.node_id, args.spec_file)
+    FOV_H = spec.fov_horizontal
+    FOV_V = spec.fov_vertical
+    RES_W = spec.resolution_width
+    RES_H = spec.resolution_height
+    print(f"Optics for {config.node_id}: {spec.sensor} "
+          f"FOV {FOV_H:.1f}x{FOV_V:.1f} @ {RES_W}x{RES_H}")
     
     try:
         last_announce = 0.0

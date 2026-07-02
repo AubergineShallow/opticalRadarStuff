@@ -1,3 +1,5 @@
+
+
 """
 udp_server.py
 PURPOSE: Receive and process UDP telemetry packets.
@@ -32,32 +34,35 @@ class ReceivedPacket:
 class UDPServer:
     """
     UDP server for receiving telemetry packets.
-    
+
     Features:
         - Non-blocking packet reception
-        - Optional authentication
         - Packet queuing for processing
+
+    Authentication happens at the object level in server_main._process_packet
+    (single per-node KeyManager path). The transport-level authenticator this
+    class used to accept was a second, divergent verification path that
+    server_main never used — it mis-sized the header check and could not
+    verify announce packets at all — so it was removed rather than left to
+    drift.
     """
-    
+
     def __init__(
         self,
         port: int = UDP_PORT,
         max_packet_size: int = MAX_PACKET_SIZE,
-        authenticator = None,
         buffer_size: int = 1000
     ):
         """
         Initialize UDP server.
-        
+
         Args:
             port: UDP port to listen on
             max_packet_size: Maximum packet size
-            authenticator: Optional Authenticator for verification
             buffer_size: Packet queue buffer size
         """
         self.port = port
         self.max_packet_size = max_packet_size
-        self.authenticator = authenticator
         
         self._socket: Optional[socket.socket] = None
         self._running = False
@@ -126,32 +131,23 @@ class UDPServer:
         addr: tuple,
         receive_time: float
     ) -> Optional[ReceivedPacket]:
-        """Process received packet data."""
+        """Process received packet data (parse only; auth is object-level)."""
         sender_ip, sender_port = addr
-        
-        # Check if authentication is enabled
-        if self.authenticator:
-            result = self.authenticator.verify_packet(data)
-            if not result.valid:
-                self._auth_failures += 1
-                return None
-            packet = result.packet
-        else:
-            # No authentication, just parse
-            try:
-                # Peek at packet type (Byte 1)
-                # Header starts with Version (B) + Type (B)
-                if len(data) >= 2:
-                    pkt_type = data[1]
-                    if pkt_type == PACKET_TYPE_ANNOUNCE:
-                        packet = AnnouncePacket.unpack(data)
-                    else:
-                        packet = TelemetryPacket.unpack(data)
+
+        try:
+            # Peek at packet type (Byte 1)
+            # Header starts with Version (B) + Type (B)
+            if len(data) >= 2:
+                pkt_type = data[1]
+                if pkt_type == PACKET_TYPE_ANNOUNCE:
+                    packet = AnnouncePacket.unpack(data)
                 else:
-                    return None
-            except Exception:
+                    packet = TelemetryPacket.unpack(data)
+            else:
                 return None
-        
+        except Exception:
+            return None
+
         return ReceivedPacket(
             packet=packet,
             sender_ip=sender_ip,

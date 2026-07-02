@@ -1,3 +1,5 @@
+
+
 """
 metrics.py
 PURPOSE: Performance metrics with Prometheus export support.
@@ -34,6 +36,8 @@ class MetricsCollector:
         self._metrics: Dict[str, MetricValue] = {}
         self._lock = Lock()
         self._histograms: Dict[str, list] = {}
+        self._http_server = None
+        self._http_thread = None
     
     def _key(self, name: str, labels: Dict[str, str]) -> str:
         """Create unique key from name and labels."""
@@ -199,11 +203,89 @@ class MetricsCollector:
         
         return '\n'.join(lines)
     
+    def snapshot(self) -> Dict[str, float]:
+        """
+        Return a plain {metric_key: value} dict of all current gauges/counters
+        plus histogram means — suitable for folding into a status broadcast (P5.2).
+        """
+        out: Dict[str, float] = {}
+        with self._lock:
+            for key, metric in self._metrics.items():
+                out[key] = metric.value
+            for key, values in self._histograms.items():
+                if values:
+                    name = key.split('{')[0]
+                    out[f"{name}_mean"] = sum(values) / len(values)
+        return out
+
     def reset(self) -> None:
         """Clear all metrics."""
         with self._lock:
             self._metrics.clear()
             self._histograms.clear()
+
+    # ------------------------------------------------------------------ #
+    # Prometheus exposition endpoint                                      #
+    # ------------------------------------------------------------------ #
+    def start_http_exporter(self, port: int = 8000) -> bool:
+        """Serve to_prometheus() over HTTP GET /metrics (and /).
+
+        This is what makes monitoring.prometheus_port a real setting — the
+        exposition format existed but nothing ever served it. Failure to bind
+        (port taken) is logged and non-fatal; metrics still reach the UI via
+        the status broadcast.
+        """
+        if self._http_server is not None:
+            return True
+
+        import threading
+        from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
+        collector = self
+
+        class _Handler(BaseHTTPRequestHandler):
+            def do_GET(self):  # noqa: N802 (stdlib API name)
+                if self.path.split('?')[0] not in ('/', '/metrics'):
+                    self.send_response(404)
+                    self.end_headers()
+                    return
+                body = collector.to_prometheus().encode('utf-8')
+                self.send_response(200)
+                self.send_header('Content-Type',
+                                 'text/plain; version=0.0.4; charset=utf-8')
+                self.send_header('Content-Length', str(len(body)))
+                self.end_headers()
+                self.wfile.write(body)
+
+            def log_message(self, fmt, *args):
+                pass  # keep scrape noise out of the server console
+
+        try:
+            self._http_server = ThreadingHTTPServer(('0.0.0.0', port), _Handler)
+        except OSError as e:
+            print(f"Metrics exporter failed to bind port {port}: {e}")
+            self._http_server = None
+            return False
+
+        self._http_thread = threading.Thread(
+            target=self._http_server.serve_forever, daemon=True)
+        self._http_thread.start()
+        return True
+
+    def stop_http_exporter(self) -> None:
+        """Shut down the exposition endpoint (idempotent)."""
+        server = self._http_server
+        if server is None:
+            return
+        self._http_server = None
+        try:
+            server.shutdown()
+            server.server_close()
+        except Exception:
+            pass
+        if self._http_thread:
+            self._http_thread.join(timeout=2.0)
+            self._http_thread = None
 
 
 # Standard metric names
