@@ -7,7 +7,6 @@ PURPOSE: Math for describing rotations in 3D space.
 
 import math
 from typing import Tuple
-import numpy as np
 
 
 def normalize(q: Tuple[float, float, float, float]) -> Tuple[float, float, float, float]:
