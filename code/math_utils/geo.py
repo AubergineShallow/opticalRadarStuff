@@ -6,7 +6,6 @@ PURPOSE: Convert between different ways of describing locations on Earth.
 """
 
 import math
-import numpy as np
 from typing import Tuple
 
 # WGS84 ellipsoid parameters
