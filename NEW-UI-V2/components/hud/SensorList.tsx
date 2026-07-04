@@ -1,8 +1,6 @@
-
-
 import React, { useState } from 'react';
 import { Camera, ChevronUp, ChevronDown, PlusCircle } from 'lucide-react';
-import { NodeHealth } from '../../types';
+import { NodeHealth, NodeHealthStatus } from '../../types';
 import { useAppStore } from '../../store';
 
 interface SensorListProps {
@@ -12,6 +10,25 @@ interface SensorListProps {
     onAssignNode?: (id: string) => void;
 }
 
+const STATUS_META: Record<number, { label: string; dot: string; text: string }> = {
+    [NodeHealthStatus.HEALTHY]: { label: 'OK', dot: 'bg-green-500', text: 'text-green-400' },
+    [NodeHealthStatus.DEGRADED]: { label: 'DEGR', dot: 'bg-yellow-500', text: 'text-yellow-400' },
+    [NodeHealthStatus.FAILING]: { label: 'FAIL', dot: 'bg-orange-500', text: 'text-orange-400' },
+    [NodeHealthStatus.OFFLINE]: { label: 'OFF', dot: 'bg-red-500', text: 'text-red-400' },
+};
+
+// Calibration status -> colour (values emitted by the backend calibration loop).
+const CALIB_META: Record<string, string> = {
+    converged: 'text-green-400',
+    converging: 'text-yellow-400',
+    diverged: 'text-red-400',
+    uncalibrated: 'text-gray-500',
+};
+
+function statusMeta(status: NodeHealthStatus) {
+    return STATUS_META[status] ?? STATUS_META[NodeHealthStatus.OFFLINE];
+}
+
 export function SensorList({ nodes, onSelectNode, selectedNodeId, onAssignNode }: SensorListProps) {
     const [isMinimized, setIsMinimized] = useState(false);
     const nodeList = Object.values(nodes);
@@ -19,12 +36,23 @@ export function SensorList({ nodes, onSelectNode, selectedNodeId, onAssignNode }
     // Pending / unassigned nodes come from the store (P3.6).
     const pendingNodeIds = useAppStore(s => s.pendingNodeIds);
     const activeClusterId = useAppStore(s => s.activeClusterId);
+    const calibration = useAppStore(s => s.calibration);
+    const requestFocus = useAppStore(s => s.requestFocus);
+
+    const healthyCount = nodeList.filter(n => n.status === NodeHealthStatus.HEALTHY).length;
+    const nowSec = Date.now() / 1000;
 
     return (
         <div className="bg-black/80 border border-cyan-500/30 p-2 rounded w-96 backdrop-blur pointer-events-auto flex flex-col gap-2 shadow-[0_0_15px_rgba(0,255,255,0.1)] transition-all duration-200">
             <div className={`flex items-center justify-between px-2 ${isMinimized ? '' : 'border-b border-cyan-500/20 pb-2'}`}>
                 <div className="flex items-center gap-2 text-cyan-400 font-bold">
-                    <Camera className="w-4 h-4" /> <span>SENSORS ({nodeList.length})</span>
+                    <Camera className="w-4 h-4" />
+                    <span>SENSORS</span>
+                    {/* Healthy/total gives an at-a-glance fleet status. */}
+                    <span className="text-xs font-mono text-gray-400">
+                        (<span className={nodeList.length === 0 ? 'text-gray-500'
+                            : healthyCount === nodeList.length ? 'text-green-400' : 'text-yellow-400'}>{healthyCount}</span>/{nodeList.length})
+                    </span>
                 </div>
                 <button
                     onClick={() => setIsMinimized(!isMinimized)}
@@ -64,8 +92,8 @@ export function SensorList({ nodes, onSelectNode, selectedNodeId, onAssignNode }
                                 <tr>
                                     <th className="p-2 font-mono font-normal">ID</th>
                                     <th className="p-2 font-mono font-normal text-right">POS (LLA)</th>
-                                    <th className="p-2 font-mono font-normal text-right">ORIENT</th>
-                                    <th className="p-2 font-mono font-normal text-right">FOV</th>
+                                    <th className="p-2 font-mono font-normal text-center">STATUS</th>
+                                    <th className="p-2 font-mono font-normal text-right">CALIB</th>
                                 </tr>
                             </thead>
                             <tbody className="divide-y divide-white/5">
@@ -77,10 +105,11 @@ export function SensorList({ nodes, onSelectNode, selectedNodeId, onAssignNode }
                                     nodeList.map(node => {
                                         const isSelected = selectedNodeId === node.node_id;
                                         const pU = (node.location || [0, 0, 0])[2];
-
-                                        // display_lat/lon precomputed at receipt (P3.2);
-                                        // sensor_config now typed (no `as any` cast — P3.1).
-                                        const config = node.sensor_config;
+                                        const meta = statusMeta(node.status);
+                                        // A node whose last packet is old is stale even if its last
+                                        // reported status was healthy.
+                                        const stale = node.last_seen > 0 && (nowSec - node.last_seen) > 10;
+                                        const calib = calibration[node.node_id];
 
                                         return (
                                             <tr
@@ -90,9 +119,18 @@ export function SensorList({ nodes, onSelectNode, selectedNodeId, onAssignNode }
                                                     ${isSelected ? 'bg-cyan-500/20' : 'hover:bg-white/10'}
                                                 `}
                                                 onClick={() => onSelectNode?.(node.node_id)}
+                                                onDoubleClick={() => {
+                                                    if (node.display_lat !== undefined && node.display_lon !== undefined) {
+                                                        requestFocus(node.display_lat, node.display_lon);
+                                                    }
+                                                }}
+                                                title="Click to select · double-click to center map"
                                             >
                                                 <td className="p-2 text-cyan-400 font-bold group-hover:text-cyan-300">
-                                                    {node.node_id.replace('NODE-', '')}
+                                                    <span className="flex items-center gap-2">
+                                                        <span className={`w-2 h-2 rounded-full shrink-0 ${meta.dot} ${stale ? 'opacity-40' : ''}`} />
+                                                        {node.node_id.replace('NODE-', '')}
+                                                    </span>
                                                 </td>
                                                 <td className="p-2 text-right text-gray-300">
                                                     <div className="flex flex-col text-[10px] leading-tight">
@@ -101,17 +139,15 @@ export function SensorList({ nodes, onSelectNode, selectedNodeId, onAssignNode }
                                                         <span className="text-[9px] text-gray-500">ALT: {pU.toFixed(0)}m</span>
                                                     </div>
                                                 </td>
-                                                <td className="p-2 text-right text-white">
-                                                    <div className="flex flex-col text-[10px]">
-                                                        <span>AZ: {config?.azimuth_deg ?? '—'}°</span>
-                                                        <span>EL: {config?.elevation_deg ?? '—'}°</span>
-                                                    </div>
+                                                <td className="p-2 text-center">
+                                                    <span className={`text-[10px] ${stale ? 'text-gray-500' : meta.text}`}>
+                                                        {stale ? 'STALE' : meta.label}
+                                                    </span>
                                                 </td>
-                                                <td className="p-2 text-right text-gray-400">
-                                                    <div className="flex flex-col text-[10px]">
-                                                        <span>H: {config?.hfov_deg ?? '—'}°</span>
-                                                        <span>V: {config?.vfov_deg ?? '—'}°</span>
-                                                    </div>
+                                                <td className="p-2 text-right">
+                                                    <span className={`text-[10px] ${calib ? (CALIB_META[calib] ?? 'text-gray-400') : 'text-gray-600'}`}>
+                                                        {calib ? calib.slice(0, 4).toUpperCase() : '—'}
+                                                    </span>
                                                 </td>
                                             </tr>
                                         );

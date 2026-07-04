@@ -1,4 +1,3 @@
-
 # Optional dependencies for the LoRa / Meshtastic ingest gateway.
 # The server runs fine without these; they are only imported (lazily) when
 # lora.enabled is set and the corresponding transport is selected.

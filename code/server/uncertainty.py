@@ -1,5 +1,3 @@
-
-
 """
 uncertainty.py
 PURPOSE: Turn per-node angular (bearing) uncertainty into a 3D positional

@@ -1,5 +1,3 @@
-
-
 """
 calibration.py
 PURPOSE: Solve alignment errors with validation steps.

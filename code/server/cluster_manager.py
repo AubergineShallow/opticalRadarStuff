@@ -1,5 +1,3 @@
-
-
 import math
 import numpy as np
 from typing import Dict, List, Optional, Tuple, Set
@@ -43,6 +41,10 @@ class Cluster:
         vg_config.decay_rate = _cfg_get(grid_section, 'decay_rate', 0.95)
         # P0.4: the field is hot_threshold, not detection_threshold.
         vg_config.hot_threshold = _cfg_get(grid_section, 'hot_threshold', 5.0)
+        # Leaf ceiling (memory + traversal-cost guard). Falls back to the
+        # VoxelGridConfig default when the section doesn't specify it.
+        vg_config.max_active_leaves = _cfg_get(
+            grid_section, 'max_active_leaves', vg_config.max_active_leaves)
         self.voxel_grid = VoxelGrid(vg_config)
 
         # ENU reference origin: prefer the real `reference` section; fall back to
@@ -96,12 +98,28 @@ class ClusterManager:
         net_cfg = getattr(config, 'network', None)
         self.max_pending_nodes: int = _cfg_get(net_cfg, 'max_nodes', 256)
 
+        # Upper bound on distinct clusters. Each cluster allocates a full voxel
+        # grid + tracker + ray builder, so an unauthenticated WebSocket client
+        # spamming CREATE_CLUSTER could otherwise exhaust memory/CPU. The reserved
+        # DEFAULT cluster always fits under the cap.
+        self.max_clusters: int = _cfg_get(net_cfg, 'max_clusters', 64)
+
         # Default fallback cluster if auto-create is enabled, or explicit creation
         self.create_cluster('DEFAULT')
 
-    def create_cluster(self, cluster_id: str) -> Cluster:
-        if cluster_id not in self.clusters:
-            self.clusters[cluster_id] = Cluster(cluster_id, self.config)
+    def create_cluster(self, cluster_id: str) -> Optional[Cluster]:
+        """Create (or return existing) cluster, or None if the cap is hit.
+
+        Returns the existing cluster when the id is already known, a new cluster
+        when there is room, and None when creating a new one would exceed
+        max_clusters (so callers can reject the request instead of growing
+        memory without limit).
+        """
+        if cluster_id in self.clusters:
+            return self.clusters[cluster_id]
+        if len(self.clusters) >= self.max_clusters:
+            return None
+        self.clusters[cluster_id] = Cluster(cluster_id, self.config)
         return self.clusters[cluster_id]
 
     def assign_node(self, node_id: str, cluster_id: str) -> bool:

@@ -1,5 +1,3 @@
-
-
 """
 lora_link.py
 PURPOSE: Transport abstraction for the compressed LoRa payloads defined in

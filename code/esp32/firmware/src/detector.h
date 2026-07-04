@@ -1,4 +1,3 @@
-
 // detector.h - Frame-difference motion detection on a grayscale frame.
 //
 // Mirrors the intent of code/rpi/vision.py: diff against the previous frame,

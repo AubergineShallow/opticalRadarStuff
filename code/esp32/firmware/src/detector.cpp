@@ -1,4 +1,3 @@
-
 // detector.cpp - see detector.h
 #include "detector.h"
 #include <stdlib.h>

@@ -1,4 +1,3 @@
-
 #!/usr/bin/env python
 """
 provision_node.py

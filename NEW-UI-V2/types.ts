@@ -1,5 +1,3 @@
-
-
 /**
  * OpticalRadar Data Types
  * Closely matching backend implementation conventions.
@@ -66,6 +64,10 @@ export interface Track {
     confidence: number;     // [0.0, 1.0]
     predicted_next: Vector3; // Position at t+dt
     cluster_id?: string;     // owning cluster (stamped by backend, P0.6)
+    // EMA-smoothed physical size estimate in metres, fused server-side from the
+    // angular sizes reported by the sensors (2*range*tan(theta/2), median over
+    // nodes). 0 / absent = no estimate available.
+    physical_size?: number;
     display?: TrackDisplayProps; // precomputed at receipt (P3.2)
 }
 

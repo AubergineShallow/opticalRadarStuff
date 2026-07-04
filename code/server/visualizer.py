@@ -1,5 +1,3 @@
-
-
 """
 visualizer.py
 PURPOSE: 3D visualization of voxel grid and detections.

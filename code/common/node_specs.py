@@ -1,5 +1,3 @@
-
-
 """
 node_specs.py
 PURPOSE: Load per-node optical specifications from a JSON registry file.

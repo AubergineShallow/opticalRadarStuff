@@ -1,5 +1,3 @@
-
-
 """
 tracker.py
 PURPOSE: Main tracking interface combining all components.
@@ -26,6 +24,10 @@ class Detection:
     # present it is passed to the Kalman filter as this measurement's noise R;
     # when None the tracker falls back to its fixed isotropic R.
     covariance: Optional[np.ndarray] = None
+    # Optional physical size estimate (metres) fused from the angular sizes of
+    # the rays that produced this detection (2*range*tan(theta/2), median over
+    # contributing sensors). None when no contributing ray reported a size.
+    size_estimate: Optional[float] = None
 
 
 @dataclass
@@ -149,7 +151,8 @@ class Tracker:
                 dt,
                 class_id=det.class_id,
                 confidence=det.confidence,
-                measurement_covariance=getattr(det, 'covariance', None)
+                measurement_covariance=getattr(det, 'covariance', None),
+                size_estimate=getattr(det, 'size_estimate', None)
             )
             updated_tracks.append(track_id)
         
@@ -171,7 +174,8 @@ class Tracker:
                 det.position,
                 class_id=det.class_id,
                 confidence=det.confidence,
-                measurement_covariance=getattr(det, 'covariance', None)
+                measurement_covariance=getattr(det, 'covariance', None),
+                size_estimate=getattr(det, 'size_estimate', None)
             )
             new_tracks.append(track.track_id)
         

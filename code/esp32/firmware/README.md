@@ -1,4 +1,3 @@
-
 # ESP32-CAM Optical Tracking Node (firmware)
 
 An ESP32-CAM (AI-Thinker, OV2640) that does on-board motion detection, reads its

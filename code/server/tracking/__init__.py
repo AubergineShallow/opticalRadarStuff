@@ -1,5 +1,3 @@
-
-
 """Tracking subsystem - object tracking with Kalman filter."""
 
 from .kalman_filter import KalmanFilter, KalmanState

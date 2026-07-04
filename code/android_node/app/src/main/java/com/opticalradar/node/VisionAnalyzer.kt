@@ -1,5 +1,3 @@
-
-
 package com.opticalradar.node
 
 import android.annotation.SuppressLint

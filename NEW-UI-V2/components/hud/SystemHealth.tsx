@@ -1,7 +1,5 @@
-
-
 import React, { useState } from 'react';
-import { Power, Activity, Cpu, Server, ChevronUp, ChevronDown } from 'lucide-react';
+import { Power, Activity, Cpu, Server, ChevronUp, ChevronDown, Crosshair, Grid3x3 } from 'lucide-react';
 import { SystemStatus } from '../../types';
 
 interface SystemHealthProps {
@@ -16,6 +14,12 @@ export function SystemHealth({ status }: SystemHealthProps) {
     const cpu = status?.cpu_percent ?? 0;
     const mem = status?.memory_percent ?? 0;
     const uptime = status?.uptime_seconds ?? 0;
+    const tracks = status?.total_tracks ?? 0;
+    const voxels = status?.total_voxels ?? 0;
+
+    // The backend reports FPS relative to its target loop rate (30 Hz); colour it
+    // so a struggling server (loop falling behind) is obvious at a glance.
+    const fpsColor = fps >= 25 ? 'text-green-300' : fps >= 15 ? 'text-yellow-400' : 'text-red-400';
 
     return (
         <div className="bg-black/80 border border-green-500/30 p-2 rounded w-64 backdrop-blur pointer-events-auto shadow-[0_0_15px_rgba(0,255,0,0.1)] transition-all duration-200">
@@ -36,7 +40,15 @@ export function SystemHealth({ status }: SystemHealthProps) {
                 <div className="space-y-2 text-sm text-gray-300 font-mono px-2">
                     <div className="flex justify-between items-center">
                         <span className="flex items-center gap-2"><Server className="w-3 h-3 text-gray-500" /> FPS</span>
-                        <span className="text-green-300">{fps.toFixed(1)}</span>
+                        <span className={fpsColor}>{fps.toFixed(1)}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                        <span className="flex items-center gap-2"><Crosshair className="w-3 h-3 text-gray-500" /> TRACKS</span>
+                        <span className="text-amber-300">{tracks}</span>
+                    </div>
+                    <div className="flex justify-between items-center">
+                        <span className="flex items-center gap-2"><Grid3x3 className="w-3 h-3 text-gray-500" /> VOXELS</span>
+                        <span className="text-cyan-300">{voxels}</span>
                     </div>
                     <div className="flex justify-between items-center">
                         <span className="flex items-center gap-2"><Cpu className="w-3 h-3 text-gray-500" /> CPU</span>

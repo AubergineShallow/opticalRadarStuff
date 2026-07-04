@@ -1,4 +1,3 @@
-
 // sensors.h - GNSS (NEO-6M/M8N/M9N) and IMU (MPU-6050 / BNO08x) drivers.
 //
 // GNSS gives lat/lon/alt; IMU gives roll/pitch/yaw. Together they form the pose

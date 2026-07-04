@@ -1,5 +1,3 @@
-
-
 /*
  * process_image.cpp
  * PURPOSE: High-speed ray tracing for the voxel grid.

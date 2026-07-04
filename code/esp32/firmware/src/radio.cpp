@@ -1,4 +1,3 @@
-
 // radio.cpp - backend implementations for radio.h, selected by -D flags.
 #include "radio.h"
 #include "../include/config.h"

@@ -1,5 +1,3 @@
-
-
 """
 foxglove_broadcaster.py
 PURPOSE: Optional, parallel live-streaming broadcaster for Foxglove/Flora.

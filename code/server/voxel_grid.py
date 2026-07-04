@@ -1,5 +1,3 @@
-
-
 """
 voxel_grid.py
 PURPOSE: Sparse hierarchical octree for accumulating ray intersections.
@@ -59,6 +57,13 @@ class VoxelGridConfig:
     cold_threshold: float = 0.5      # heat below which a leaf may be collapsed
     camera_window_frames: int = 10   # co-temporal window for M-camera trigger (P2.5)
     min_cameras_to_subdivide: int = 3
+    # Hard ceiling on live leaves. Subdivision is a per-ray operation with no
+    # intrinsic bound: a noisy or adversarial scene (many cameras, many bearings)
+    # can drive the tree to millions of leaves, which blows up both memory and
+    # per-ray traversal cost (every ray walks every candidate leaf). Once this
+    # ceiling is reached the grid stops refining and deposits into the current
+    # coarse leaf instead — accuracy degrades gracefully, the loop stays real-time.
+    max_active_leaves: int = 20000
 
 
 @dataclass
@@ -360,7 +365,12 @@ class VoxelGrid:
                 subdivide = False
                 min_cams = self.config.min_cameras_to_subdivide
                 leaf_size = float(node.size[0])
-                if len(rc) >= min_cams and leaf_size > self.config.resolution_m:
+                # Stop refining once the leaf ceiling is reached: a subdivide adds
+                # up to 8 leaves, so gating here bounds total memory and traversal
+                # cost. The leaf still accumulates heat, so hot regions stay
+                # detectable — just at the current (coarser) resolution.
+                if (len(rc) >= min_cams and leaf_size > self.config.resolution_m
+                        and len(self._active_leaves) < self.config.max_active_leaves):
                     window = self.config.camera_window_frames
                     stale = [cid for cid, f in rc.items() if frame_index - f > window]
                     for cid in stale:

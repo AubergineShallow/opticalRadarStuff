@@ -1,5 +1,3 @@
-
-
 """
 data_association.py
 PURPOSE: Match detections to existing tracks using Hungarian algorithm.

@@ -1,0 +1,171 @@
+[08:59:53] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:53] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:53] [INFO ] [calibration ] Applied 3.00° correction to CAM-01
+[08:59:53] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:53] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:53] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:53] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:53] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:53] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:53] [INFO ] [cluster     ] Created new cluster: ZONE-9
+[08:59:53] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:53] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:53] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:53] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:53] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:53] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:53] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:53] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:54] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:54] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:54] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:54] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:54] [INFO ] [system      ] OpticalRadar server started successfully
+[08:59:54] [INFO ] [system      ] OpticalRadar server shutdown complete
+[08:59:54] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:54] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:54] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:54] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:54] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:54] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:54] [WARNING] [security    ] Signature verification failed for packet from ('10.0.0.9', 5005)
+[08:59:54] [INFO ] [network     ] Node announcement received from REALNODE at ('10.0.0.10', 5005)
+[08:59:54] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:54] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:54] [INFO ] [network     ] Node announcement received from n0 at ('10.0.0.1', 5005)
+[08:59:54] [INFO ] [network     ] Node announcement received from n1 at ('10.0.0.1', 5005)
+[08:59:54] [WARNING] [network     ] Node registry full (6); rejecting new node n2
+[08:59:54] [WARNING] [network     ] Node registry full (6); rejecting new node n3
+[08:59:54] [WARNING] [network     ] Node registry full (6); rejecting new node n4
+[08:59:54] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:54] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:54] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:54] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:54] [INFO ] [network     ] Node announcement received from lora20 at ('lora', 0)
+[08:59:54] [INFO ] [system      ] OpticalRadar server shutdown complete
+[08:59:54] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:54] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:54] [INFO ] [lora        ] LoRa gateway configured (transport=loopback)
+[08:59:54] [INFO ] [lora        ] LoRa gateway started
+[08:59:54] [INFO ] [network     ] Node announcement received from lora21 at ('lora', 0)
+[08:59:54] [INFO ] [system      ] OpticalRadar server shutdown complete
+[08:59:54] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:54] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:54] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:54] [WARNING] [security    ] Authentication system disabled via configuration
+[08:59:54] [INFO ] [system      ] Initializing OpticalRadar server
+[08:59:54] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:20] [INFO ] [calibration ] Applied 3.00° correction to CAM-01
+[09:00:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:20] [INFO ] [cluster     ] Created new cluster: ZONE-9
+[09:00:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:21] [INFO ] [system      ] OpticalRadar server started successfully
+[09:00:21] [INFO ] [system      ] OpticalRadar server shutdown complete
+[09:00:21] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:21] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:21] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:21] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:21] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:21] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:21] [WARNING] [security    ] Signature verification failed for packet from ('10.0.0.9', 5005)
+[09:00:21] [INFO ] [network     ] Node announcement received from REALNODE at ('10.0.0.10', 5005)
+[09:00:21] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:21] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:21] [INFO ] [network     ] Node announcement received from n0 at ('10.0.0.1', 5005)
+[09:00:21] [INFO ] [network     ] Node announcement received from n1 at ('10.0.0.1', 5005)
+[09:00:21] [WARNING] [network     ] Node registry full (6); rejecting new node n2
+[09:00:21] [WARNING] [network     ] Node registry full (6); rejecting new node n3
+[09:00:21] [WARNING] [network     ] Node registry full (6); rejecting new node n4
+[09:00:21] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:21] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:21] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:21] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:21] [INFO ] [network     ] Node announcement received from lora20 at ('lora', 0)
+[09:00:21] [INFO ] [system      ] OpticalRadar server shutdown complete
+[09:00:21] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:21] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:21] [INFO ] [lora        ] LoRa gateway configured (transport=loopback)
+[09:00:21] [INFO ] [lora        ] LoRa gateway started
+[09:00:21] [INFO ] [network     ] Node announcement received from lora21 at ('lora', 0)
+[09:00:21] [INFO ] [system      ] OpticalRadar server shutdown complete
+[09:00:21] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:21] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:21] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:21] [WARNING] [security    ] Authentication system disabled via configuration
+[09:00:21] [INFO ] [system      ] Initializing OpticalRadar server
+[09:00:21] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:19] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:19] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:19] [INFO ] [calibration ] Applied 3.00° correction to CAM-01
+[09:01:19] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:19] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:19] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:19] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:19] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:19] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:19] [INFO ] [cluster     ] Created new cluster: ZONE-9
+[09:01:19] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:19] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:19] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:19] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:19] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:19] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:19] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:19] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:20] [INFO ] [system      ] OpticalRadar server started successfully
+[09:01:20] [INFO ] [system      ] OpticalRadar server shutdown complete
+[09:01:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:20] [WARNING] [security    ] Signature verification failed for packet from ('10.0.0.9', 5005)
+[09:01:20] [INFO ] [network     ] Node announcement received from REALNODE at ('10.0.0.10', 5005)
+[09:01:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:20] [INFO ] [network     ] Node announcement received from n0 at ('10.0.0.1', 5005)
+[09:01:20] [INFO ] [network     ] Node announcement received from n1 at ('10.0.0.1', 5005)
+[09:01:20] [WARNING] [network     ] Node registry full (6); rejecting new node n2
+[09:01:20] [WARNING] [network     ] Node registry full (6); rejecting new node n3
+[09:01:20] [WARNING] [network     ] Node registry full (6); rejecting new node n4
+[09:01:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:20] [INFO ] [network     ] Node announcement received from lora20 at ('lora', 0)
+[09:01:20] [INFO ] [system      ] OpticalRadar server shutdown complete
+[09:01:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:20] [INFO ] [lora        ] LoRa gateway configured (transport=loopback)
+[09:01:20] [INFO ] [lora        ] LoRa gateway started
+[09:01:20] [INFO ] [network     ] Node announcement received from lora21 at ('lora', 0)
+[09:01:20] [INFO ] [system      ] OpticalRadar server shutdown complete
+[09:01:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:20] [WARNING] [security    ] Authentication system disabled via configuration
+[09:01:20] [INFO ] [system      ] Initializing OpticalRadar server
+[09:01:20] [WARNING] [security    ] Authentication system disabled via configuration

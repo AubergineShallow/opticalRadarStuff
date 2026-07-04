@@ -1,5 +1,3 @@
-
-
 """Security subsystem - authentication and key management."""
 
 from .authenticator import Authenticator, AuthResult, AuthenticationError

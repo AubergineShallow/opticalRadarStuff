@@ -1,5 +1,3 @@
-
-
 """
 lora_protocol.py
 PURPOSE: Defines a highly compressed micro-payload for LoRa / Meshtastic / LoRaWAN
@@ -194,9 +192,16 @@ class LoRaFramer:
     and buffers the rest. Resynchronises past corruption automatically.
     """
 
-    def __init__(self, max_buffer: int = 4096):
+    def __init__(self, max_buffer: int = 4096, max_payload: int = 64):
         self._buf = bytearray()
         self._max_buffer = max_buffer
+        # Longest payload the deframer will wait for. The LoRa micro-payloads are
+        # tiny (ANNOUNCE 20 B, UPDATE 7 B), so any length byte far above that is a
+        # false sync, not a real length. Without this bound a spurious 0xAA55
+        # followed by a large length byte makes the framer wait for a frame bigger
+        # than the whole remaining stream — stalling and swallowing every real
+        # frame behind it. Rejecting the implausible length lets it resync.
+        self._max_payload = max_payload
 
     def push(self, data: bytes) -> List[bytes]:
         """Append received bytes and return any completed payloads."""
@@ -223,6 +228,14 @@ class LoRaFramer:
             if len(self._buf) < 3:
                 break
             length = self._buf[2]
+
+            # An implausibly large length means this sync word is spurious (noise
+            # or the tail of a corrupted frame). Skip past it and resync on the
+            # next candidate instead of blocking on a frame that will never come.
+            if length > self._max_payload:
+                del self._buf[:2]
+                continue
+
             total = 2 + 1 + length + 2  # sync + len + payload + crc
             if len(self._buf) < total:
                 break  # wait for the rest

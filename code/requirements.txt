@@ -1,5 +1,7 @@
-
 # Core server dependencies (actually imported today).
 websockets
 numpy
 pyyaml
+# Hungarian assignment in server/tracking/data_association.py hard-imports scipy
+# (reached via tracker -> every cluster), so the server cannot start without it.
+scipy

@@ -1,5 +1,3 @@
-
-
 """
 authenticator.py
 PURPOSE: HMAC-based authentication for telemetry packets.

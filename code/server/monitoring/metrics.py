@@ -1,5 +1,3 @@
-
-
 """
 metrics.py
 PURPOSE: Performance metrics with Prometheus export support.

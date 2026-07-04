@@ -1,0 +1,41 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Optical Radar VR</title>
+    <style>
+      body { margin: 0; padding: 0; background: #000; overflow: hidden; font-family: monospace; }
+      #overlay {
+        position: fixed; top: 10px; left: 10px; z-index: 10;
+        color: #00ff41; font-size: 13px; text-shadow: 0 0 4px rgba(0,255,65,0.5);
+      }
+      #overlay h1 { font-size: 15px; margin: 0 0 6px 0; letter-spacing: 2px; }
+      #status { margin-bottom: 8px; white-space: pre; }
+      #enter-vr {
+        background: rgba(0, 40, 12, 0.8); color: #00ff41; border: 1px solid #00ff41;
+        font-family: monospace; font-size: 14px; padding: 8px 18px; cursor: pointer;
+      }
+      #enter-vr:disabled { color: #4a6a52; border-color: #4a6a52; cursor: default; }
+      #mode-link { color: #00ffff; margin-left: 12px; font-size: 12px; }
+    </style>
+    <script type="importmap">
+{
+  "imports": {
+    "three": "https://esm.sh/three@^0.170.0",
+    "zustand": "https://esm.sh/zustand@^5.0.10",
+    "zustand/vanilla": "https://esm.sh/zustand@^5.0.10/vanilla"
+  }
+}
+    </script>
+  </head>
+  <body>
+    <div id="overlay">
+      <h1>OPTICAL RADAR — VR</h1>
+      <div id="status">starting…</div>
+      <button id="enter-vr" disabled>checking WebXR…</button>
+      <a id="mode-link" href="?mock=true">RUN SIM MODE</a>
+    </div>
+    <script type="module" src="/index.ts"></script>
+  </body>
+</html>

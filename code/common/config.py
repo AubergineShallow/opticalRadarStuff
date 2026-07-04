@@ -1,5 +1,3 @@
-
-
 """
 config.py
 PURPOSE: Centralized configuration management for Server and Nodes.
@@ -28,6 +26,14 @@ class NetworkConfig:
     # Upper bound on distinct registered/pending nodes. Guards the optics,
     # pending and health registries against floods of unique camera_ids.
     max_nodes: int = 256
+    # Upper bound on distinct clusters/domains. Each one allocates a full voxel
+    # grid + tracker, so this caps memory against a CREATE_CLUSTER flood.
+    max_clusters: int = 64
+    # Upper bound on motion vectors consumed from a single telemetry datagram.
+    # One datagram can legally carry ~8000 vectors (65 KB / 8 B); building a ray
+    # and octree-traversing for each is unbounded per-packet CPU, so the ingest
+    # path processes at most this many and drops the rest.
+    max_vectors_per_packet: int = 512
 
 
 @dataclass
@@ -58,6 +64,9 @@ class GridConfig:
     resolution_m: float = 1.0
     decay_rate: float = 0.95
     hot_threshold: float = 5.0
+    # Hard ceiling on live octree leaves per cluster (memory + traversal-cost
+    # guard against a noisy/adversarial scene). See VoxelGridConfig.
+    max_active_leaves: int = 20000
 
 
 @dataclass
@@ -185,15 +194,22 @@ def _apply_env_overrides(config: Config) -> Config:
             section_obj = getattr(config, section)
             if hasattr(section_obj, param):
                 current = getattr(section_obj, param)
-                # Type conversion based on current type
-                if isinstance(current, bool):
-                    setattr(section_obj, param, value.lower() in ("true", "1", "yes"))
-                elif isinstance(current, int):
-                    setattr(section_obj, param, int(value))
-                elif isinstance(current, float):
-                    setattr(section_obj, param, float(value))
-                else:
-                    setattr(section_obj, param, value)
+                # Type conversion based on current type. A malformed value
+                # (e.g. OR_NETWORK_UDP_PORT=abc) must NOT abort startup — the
+                # YAML path already tolerates bad input (_build_section), so the
+                # env path matches: warn and keep the existing default.
+                try:
+                    if isinstance(current, bool):
+                        setattr(section_obj, param, value.lower() in ("true", "1", "yes"))
+                    elif isinstance(current, int):
+                        setattr(section_obj, param, int(value))
+                    elif isinstance(current, float):
+                        setattr(section_obj, param, float(value))
+                    else:
+                        setattr(section_obj, param, value)
+                except (ValueError, TypeError):
+                    print(f"Warning: ignoring malformed env override {key}={value!r} "
+                          f"(expected {type(current).__name__})")
     
     return config
 

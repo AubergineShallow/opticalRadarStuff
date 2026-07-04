@@ -1,4 +1,3 @@
-
 // edge_tracker.h - Lightweight maturation tracker (mirror of
 // code/rpi/lora_edge_tracker.py). Groups noisy per-frame detections into
 // persistent tracks and only reports a track once it has been seen

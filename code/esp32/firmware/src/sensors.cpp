@@ -1,4 +1,3 @@
-
 // sensors.cpp - see sensors.h
 #include "sensors.h"
 #include "../include/config.h"

@@ -1,10 +1,21 @@
-
-
 import { TileLayer } from '@deck.gl/geo-layers';
-import { BitmapLayer, ScatterplotLayer, LineLayer, ColumnLayer, TextLayer } from '@deck.gl/layers';
+import { BitmapLayer, ScatterplotLayer, LineLayer, ColumnLayer, TextLayer, PathLayer } from '@deck.gl/layers';
 import { COORDINATE_SYSTEM } from '@deck.gl/core';
 import { UI_CONFIG } from '../../constants';
-import { NodeHealth, NodeHealthStatus, Ray, Track, Voxel } from '../../types';
+import { NodeHealth, NodeHealthStatus, Ray, Track, Vector3, Voxel } from '../../types';
+
+// Map a node's health status to a fill colour. Previously only HEALTHY vs
+// not-healthy was distinguished (green/red); a monitoring operator needs to tell
+// DEGRADED and OFFLINE apart at a glance.
+function nodeStatusColor(status: NodeHealthStatus): [number, number, number] {
+    switch (status) {
+        case NodeHealthStatus.HEALTHY: return UI_CONFIG.COLORS.NODE_HEALTHY;
+        case NodeHealthStatus.DEGRADED: return [255, 200, 0];
+        case NodeHealthStatus.FAILING: return [255, 130, 0];
+        case NodeHealthStatus.OFFLINE: return [120, 120, 120];
+        default: return UI_CONFIG.COLORS.NODE_ISSUE;
+    }
+}
 
 // --- Base Map Layer ---
 export function createBaseMapLayer() {
@@ -32,10 +43,11 @@ export function createBaseMapLayer() {
 interface NodeLayerProps {
     data: NodeHealth[];
     onSelectNode: (id: string) => void;
+    selectedNodeId: string | null;
 }
 
 export function createNodeLayer(props: NodeLayerProps) {
-    const { data, onSelectNode } = props;
+    const { data, onSelectNode, selectedNodeId } = props;
 
     return new ScatterplotLayer({
         id: 'nodes',
@@ -43,10 +55,17 @@ export function createNodeLayer(props: NodeLayerProps) {
         coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
         coordinateOrigin: UI_CONFIG.COORDINATE_ORIGIN,
         getPosition: (d: NodeHealth) => d.location,
-        getFillColor: (d: NodeHealth) => d.status === NodeHealthStatus.HEALTHY
-            ? UI_CONFIG.COLORS.NODE_HEALTHY
-            : UI_CONFIG.COLORS.NODE_ISSUE,
-        getRadius: UI_CONFIG.NODE_POINT_RADIUS,
+        getFillColor: (d: NodeHealth) => nodeStatusColor(d.status),
+        getRadius: (d: NodeHealth) => d.node_id === selectedNodeId
+            ? UI_CONFIG.NODE_POINT_RADIUS * 2
+            : UI_CONFIG.NODE_POINT_RADIUS,
+        // White ring marks the selected node so map and sensor list agree.
+        stroked: true,
+        getLineColor: (d: NodeHealth) => d.node_id === selectedNodeId
+            ? [255, 255, 255, 255]
+            : [0, 0, 0, 0],
+        getLineWidth: (d: NodeHealth) => d.node_id === selectedNodeId ? 2 : 0,
+        lineWidthUnits: 'pixels',
         pickable: true,
         onClick: (info) => {
             if (info.object) {
@@ -54,7 +73,52 @@ export function createNodeLayer(props: NodeLayerProps) {
             }
         },
         updateTriggers: {
-            getFillColor: [data]
+            getFillColor: [data],
+            getRadius: [selectedNodeId],
+            getLineColor: [selectedNodeId],
+            getLineWidth: [selectedNodeId]
+        }
+    });
+}
+
+// --- Track Motion-Trail Layer ---
+interface TrailDatum {
+    track_id: number;
+    path: Vector3[];
+    cluster_id?: string;
+}
+
+interface TrailLayerProps {
+    data: TrailDatum[];
+    visible: boolean;
+    selectedTrackId: string | null;
+}
+
+export function createTrailLayer(props: TrailLayerProps) {
+    const { data, visible, selectedTrackId } = props;
+
+    if (!visible) return null;
+
+    const isSelected = (d: TrailDatum) => d.track_id.toString() === selectedTrackId;
+
+    return new PathLayer({
+        id: 'track-trails',
+        data,
+        coordinateSystem: COORDINATE_SYSTEM.METER_OFFSETS,
+        coordinateOrigin: UI_CONFIG.COORDINATE_ORIGIN,
+        getPath: (d: TrailDatum) => d.path,
+        // The selected track's history reads brighter and wider so the eye can
+        // follow the one path that matters among many faded ones.
+        getColor: (d: TrailDatum) => isSelected(d) ? [255, 210, 60, 220] : [255, 165, 0, 100],
+        getWidth: (d: TrailDatum) => isSelected(d) ? 4 : 2,
+        widthMinPixels: 1.5,
+        capRounded: true,
+        jointRounded: true,
+        pickable: false,
+        updateTriggers: {
+            getPath: [data],
+            getColor: [selectedTrackId],
+            getWidth: [selectedTrackId]
         }
     });
 }
@@ -174,7 +238,7 @@ export function createTrackLayers(props: TrackLayerProps) {
         getTextAnchor: 'middle',
         getAlignmentBaseline: 'center',
         background: true,
-        backgroundColor: [0, 0, 0, 150],
+        getBackgroundColor: [0, 0, 0, 150], // backgroundColor is deprecated in deck.gl 9
         backgroundPadding: [4, 2],
         updateTriggers: {
             getPosition: [data],

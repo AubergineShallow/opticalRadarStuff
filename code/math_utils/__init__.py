@@ -1,5 +1,3 @@
-
-
 """Math module - coordinate transformations and quaternion operations."""
 
 from .geo import (

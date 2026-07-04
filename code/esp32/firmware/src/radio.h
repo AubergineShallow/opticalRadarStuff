@@ -1,4 +1,3 @@
-
 // radio.h - Transport abstraction for the ESP32-CAM node.
 //
 // One interface, three compile-time backends (select in platformio.ini):

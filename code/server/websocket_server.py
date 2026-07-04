@@ -1,5 +1,3 @@
-
-
 """
 websocket_server.py
 PURPOSE: Broadcast server state to frontend via WebSockets.
@@ -65,15 +63,25 @@ class WebSocketBroadcaster:
     # Room subscription                                                  #
     # ------------------------------------------------------------------ #
     def subscribe(self, websocket, cluster_id: str) -> None:
-        """Subscribe a client to a cluster room (one active room per client)."""
-        for room in self._rooms.values():
-            room.discard(websocket)
+        """Subscribe a client to a cluster room (one active room per client).
+
+        Removing the client from its previous room first (which prunes that room
+        if it empties) bounds `_rooms` to at most the number of connected
+        clients: a client that names 1000 distinct cluster_ids leaves no trail of
+        empty room sets behind it.
+        """
+        self.unsubscribe(websocket)
         self._rooms[cluster_id].add(websocket)
 
     def unsubscribe(self, websocket) -> None:
-        """Remove a client from every room."""
-        for room in self._rooms.values():
+        """Remove a client from every room, pruning any room left empty."""
+        emptied = []
+        for cluster_id, room in self._rooms.items():
             room.discard(websocket)
+            if not room:
+                emptied.append(cluster_id)
+        for cluster_id in emptied:
+            del self._rooms[cluster_id]
 
     # ------------------------------------------------------------------ #
     # Lifecycle                                                          #
@@ -164,12 +172,25 @@ class WebSocketBroadcaster:
         except (ValueError, TypeError):
             return
 
+        # A client can send any well-formed JSON — an array, number, string or
+        # null are all valid JSON but have no .get(). Treating them as a command
+        # object raised AttributeError, which propagated up to _handler and tore
+        # down the client's connection. Ignore any non-object frame instead.
+        if not isinstance(msg, dict):
+            return
+
         command = msg.get("type")
-        payload = msg.get("payload", {}) or {}
+        payload = msg.get("payload") or {}
+        # payload must be an object for the handlers that index into it; a client
+        # sending "payload": [1,2] or a bare scalar must not crash the dispatch.
+        if not isinstance(payload, dict):
+            payload = {}
 
         if command == "SUBSCRIBE_CLUSTER":
             cluster_id = payload.get("cluster_id")
-            if cluster_id:
+            # Room keys must be hashable strings; a client sending a dict/list
+            # cluster_id would otherwise raise (unhashable) inside subscribe().
+            if isinstance(cluster_id, str) and cluster_id:
                 self.subscribe(websocket, cluster_id)
             return
 
