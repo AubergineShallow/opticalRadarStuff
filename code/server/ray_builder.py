@@ -1,5 +1,3 @@
-
-
 """
 ray_builder.py
 PURPOSE: Convert camera detections to 3D rays.
@@ -41,6 +39,10 @@ class Ray:
     # Original angles (for debugging/calibration)
     azimuth: float = 0.0
     elevation: float = 0.0
+    # Apparent (angular) size of the detection in degrees, as measured by the
+    # edge node (bounding-box extent over FOV). 0.0 = not reported. Combined
+    # with the fused track range this yields a physical size estimate.
+    angular_size: float = 0.0
 
 
 class RayBuilder:
@@ -183,17 +185,19 @@ class RayBuilder:
         camera_id: str,
         azimuth: float,
         elevation: float,
-        intensity: float = 1.0
+        intensity: float = 1.0,
+        angular_size: float = 0.0
     ) -> Optional[Ray]:
         """
         Build 3D ray from camera detection.
-        
+
         Args:
             camera_id: Camera ID
             azimuth: Detection azimuth (degrees)
             elevation: Detection elevation (degrees)
             intensity: Detection intensity
-        
+            angular_size: Apparent size of the detection (degrees, 0 = unknown)
+
         Returns:
             Ray object or None if camera unknown
         """
@@ -227,7 +231,8 @@ class RayBuilder:
             intensity=intensity,
             camera_id=camera_id,
             azimuth=azimuth,
-            elevation=elevation
+            elevation=elevation,
+            angular_size=angular_size
         )
     
     def build_rays_from_packet(
@@ -256,14 +261,18 @@ class RayBuilder:
 
         # Build rays. Accept both (azimuth, elevation, intensity) tuples and
         # MotionVector dataclasses (which is what TelemetryPacket.vectors holds,
-        # and what server_main._process_packet passes in).
+        # and what server_main._process_packet passes in). MotionVectors also
+        # carry the detection's angular size; tuples don't (size stays 0.0).
         rays = []
         for vec in vectors:
             if hasattr(vec, 'azimuth'):
                 az, el, intensity = vec.azimuth, vec.elevation, vec.intensity
+                angular_size = getattr(vec, 'angular_size', 0.0)
             else:
                 az, el, intensity = vec
-            ray = self.build_ray(camera_id, az, el, intensity / 255.0)
+                angular_size = 0.0
+            ray = self.build_ray(camera_id, az, el, intensity / 255.0,
+                                 angular_size=angular_size)
             if ray:
                 rays.append(ray)
 

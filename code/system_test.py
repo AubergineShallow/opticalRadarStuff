@@ -1,5 +1,3 @@
-
-
 #!/usr/bin/env python
 """
 system_test.py - Full system orchestration test.
@@ -1497,6 +1495,128 @@ def test_lora_suite():
           server_lora_integration)
 
 
+def test_size_estimation():
+    print("\n=== Phase 17: Physical Size Estimation ===")
+    import math
+    import numpy as np
+    from server.ray_builder import RayBuilder, Ray
+    from server.server_main import OpticalRadarServer
+    from server.tracking.tracker import Tracker, Detection
+    from server.tracking.track_manager import SIZE_EMA_ALPHA
+    from common.protocol import MotionVector
+
+    def _ray(origin, toward, theta, camera_id="c"):
+        """Ray from origin aimed exactly at `toward`, reporting angular size theta."""
+        origin = np.asarray(origin, dtype=float)
+        d = np.asarray(toward, dtype=float) - origin
+        d = d / np.linalg.norm(d)
+        return Ray(origin=origin, direction=d, intensity=1.0,
+                   camera_id=camera_id, angular_size=theta)
+
+    def test_angular_size_threads_into_ray():
+        rb = RayBuilder(reference_lat=1.3521, reference_lon=103.8198, reference_alt=0.0)
+        vectors = [MotionVector(azimuth=45.0, elevation=10.0, intensity=200,
+                                class_id=1, angular_size=12.5)]
+        rays = rb.build_rays_from_packet(
+            camera_id="CAM-01",
+            latitude=1.3521, longitude=103.8198, altitude=15.0,
+            orientation=(1.0, 0.0, 0.0, 0.0),
+            vectors=vectors,
+        )
+        assert len(rays) == 1, f"expected 1 ray, got {len(rays)}"
+        assert abs(rays[0].angular_size - 12.5) < 1e-9, rays[0].angular_size
+        # Plain (az, el, intensity) tuples still work; size defaults to 0.
+        rays2 = rb.build_rays_from_packet(
+            camera_id="CAM-01",
+            latitude=1.3521, longitude=103.8198, altitude=15.0,
+            orientation=(1.0, 0.0, 0.0, 0.0),
+            vectors=[(45.0, 10.0, 200)],
+        )
+        assert rays2[0].angular_size == 0.0
+        return True
+
+    def test_size_fusion_geometry():
+        server = OpticalRadarServer(headless=True)
+        target = np.array([0.0, 100.0, 0.0])
+        # Two nodes both 100 m out: 2 deg -> ~3.49 m, 4 deg -> ~6.99 m.
+        # np.median of two samples is their mean.
+        r_a = _ray([0.0, 0.0, 0.0], target, 2.0, "a")
+        r_b = _ray([100.0, 100.0, 0.0], target, 4.0, "b")
+        expect_a = 2 * 100.0 * math.tan(math.radians(1.0))
+        expect_b = 2 * 100.0 * math.tan(math.radians(2.0))
+        est = server._estimate_physical_size(target, [r_a, r_b])
+        assert est is not None, "no estimate from two well-aimed rays"
+        assert abs(est - (expect_a + expect_b) / 2.0) < 1e-6, est
+        est_a = server._estimate_physical_size(target, [r_a])
+        assert abs(est_a - expect_a) < 1e-6, est_a
+        return True
+
+    def test_size_fusion_gating():
+        server = OpticalRadarServer(headless=True)
+        target = np.array([0.0, 100.0, 0.0])
+        # Target behind the camera -> rejected (along-ray component negative).
+        away = Ray(origin=np.zeros(3), direction=np.array([0.0, -1.0, 0.0]),
+                   intensity=1.0, camera_id="away", angular_size=5.0)
+        # Parallel ray offset 50 m -> perpendicular miss far beyond radius+slack.
+        off = Ray(origin=np.array([50.0, 0.0, 0.0]),
+                  direction=np.array([0.0, 1.0, 0.0]),
+                  intensity=1.0, camera_id="off", angular_size=5.0)
+        # No angular size reported -> nothing to contribute.
+        sizeless = _ray([0.0, 0.0, 0.0], target, 0.0, "sizeless")
+        # Nonsense apparent size (>= 90 deg) -> detector artefact, rejected.
+        huge = _ray([0.0, 0.0, 0.0], target, 120.0, "huge")
+        assert server._estimate_physical_size(
+            target, [away, off, sizeless, huge]) is None
+        # One good ray still yields its estimate amid the garbage.
+        good = _ray([0.0, 0.0, 0.0], target, 2.0, "good")
+        est = server._estimate_physical_size(target, [away, off, sizeless, huge, good])
+        expect = 2 * 100.0 * math.tan(math.radians(1.0))
+        assert est is not None and abs(est - expect) < 1e-6, est
+        return True
+
+    def test_track_size_ema():
+        tracker = Tracker(min_hits_to_confirm=1)
+        pos = np.array([0.0, 50.0, 10.0])
+        tracker.update([Detection(position=pos, size_estimate=4.0)], timestamp=100.0)
+        track = tracker.get_all_tracks()[0]
+        assert abs(track.physical_size - 4.0) < 1e-9, "first sample must seed directly"
+        tracker.update([Detection(position=pos, size_estimate=8.0)], timestamp=100.1)
+        expected = 4.0 + SIZE_EMA_ALPHA * (8.0 - 4.0)
+        assert abs(track.physical_size - expected) < 1e-9, track.physical_size
+        # A sizeless detection keeps (does not zero) the smoothed estimate.
+        tracker.update([Detection(position=pos)], timestamp=100.2)
+        assert abs(track.physical_size - expected) < 1e-9, track.physical_size
+        return True
+
+    def test_size_through_detection_pipeline():
+        # _build_detections must attach size samples from the frame's pending
+        # rays, and the resulting track must expose physical_size — the exact
+        # attribute _broadcast_tracks emits to the UI.
+        server = OpticalRadarServer(headless=True)
+        clusters = server.cluster_manager.get_all_clusters()
+        assert "DEFAULT" in clusters, f"DEFAULT cluster missing: {list(clusters)}"
+        cluster = clusters["DEFAULT"]
+        target = np.array([0.0, 100.0, 0.0])
+        server._pending_rays["DEFAULT"] = [
+            _ray([0.0, 0.0, 0.0], target, 2.0, "a"),
+            _ray([100.0, 100.0, 0.0], target, 2.0, "b"),
+        ]
+        det_objs = server._build_detections(cluster, [target])
+        assert len(det_objs) == 1 and det_objs[0].size_estimate is not None
+        assert det_objs[0].size_estimate > 0
+        cluster.tracker.update(det_objs)
+        track = cluster.tracker.get_all_tracks()[0]
+        assert getattr(track, 'physical_size', 0.0) > 0, "broadcast would still emit 0"
+        return True
+
+    check("MotionVector.angular_size threads into Ray", test_angular_size_threads_into_ray)
+    check("Size fusion: 2*range*tan(theta/2), median across nodes", test_size_fusion_geometry)
+    check("Size fusion gates out non-contributing rays", test_size_fusion_gating)
+    check("Track physical_size seeds then EMA-smooths", test_track_size_ema)
+    check("Detection pipeline attaches size; track exposes physical_size",
+          test_size_through_detection_pipeline)
+
+
 def main():
     print("=" * 60)
     print("OpticalRadar-Iter3 Full System Orchestration Test")
@@ -1520,6 +1640,7 @@ def main():
     test_foxglove()
     test_optics_and_uncertainty()
     test_lora_suite()
+    test_size_estimation()
 
     print("\n" + "=" * 60)
     print(f"Results: {PASS} passed, {FAIL} failed ({PASS + FAIL} total)")

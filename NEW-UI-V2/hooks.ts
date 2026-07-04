@@ -1,5 +1,3 @@
-
-
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { useAppStore } from './store';
 import { Track, TrackState, NodeHealthStatus, NodeHealth, Ray, WSMessage } from './types';
@@ -45,22 +43,23 @@ function enrichNode(node: NodeHealth): NodeHealth {
  * Returns { isConnected, sendCommand } — sendCommand buffers messages while the
  * socket is still connecting so a click during reconnect is not dropped (P3.5).
  */
-export function useWebSocket(url: string, enabled: boolean = true) {
-    const {
-        setTracks,
-        setVoxels,
-        setRays,
-        updateNode,
-        updateSystemStatus,
-        setClusters,
-        setPendingNodes,
-    } = useAppStore();
+// Exponential-backoff bounds for reconnection (ms).
+const RECONNECT_BASE_MS = 500;
+const RECONNECT_MAX_MS = 10000;
 
+export function useWebSocket(url: string, enabled: boolean = true) {
     const activeClusterId = useAppStore(s => s.activeClusterId);
 
     const [isConnected, setIsConnected] = useState(false);
+    // Mirrors attemptsRef into state so the UI can show reconnect progress
+    // ("RECONNECTING (3)") instead of a bare DISCONNECTED while backing off.
+    const [reconnectAttempt, setReconnectAttempt] = useState(0);
     const wsRef = useRef<WebSocket | null>(null);
     const sendQueueRef = useRef<string[]>([]);
+    const reconnectTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+    const attemptsRef = useRef(0);
+    // Set during teardown so an intentional close does not trigger a reconnect.
+    const closedByUsRef = useRef(false);
 
     const sendCommand = useCallback((type: string, payload: any = {}) => {
         const msg = JSON.stringify({ type, payload });
@@ -78,57 +77,47 @@ export function useWebSocket(url: string, enabled: boolean = true) {
             return;
         }
 
-        console.log(`[WebSocket] Connecting to ${url}...`);
-        const ws = new WebSocket(url);
-        wsRef.current = ws;
+        closedByUsRef.current = false;
+        let cancelled = false;
 
-        ws.onopen = () => {
-            console.log('[WebSocket] Connected');
-            setIsConnected(true);
-            // Flush any commands buffered while connecting.
-            const queued = sendQueueRef.current;
-            sendQueueRef.current = [];
-            queued.forEach(m => ws.send(m));
-        };
-
-        ws.onclose = () => {
-            console.log('[WebSocket] Disconnected');
-            setIsConnected(false);
-        };
-
-        ws.onerror = (error) => {
-            console.error('[WebSocket] Error:', error);
-        };
-
-        ws.onmessage = (event) => {
+        const dispatchMessage = (event: MessageEvent) => {
             try {
                 const message: WSMessage = JSON.parse(event.data);
+                // Setters are pulled fresh from the store (stable refs) so the
+                // connection effect does not need them as dependencies and can
+                // own the socket lifecycle across reconnects.
+                const store = useAppStore.getState();
 
                 switch (message.type) {
                     case 'TRACK_UPDATE':
-                        setTracks((message.payload as Track[]).map(enrichTrack));
+                        store.setTracks((message.payload as Track[]).map(enrichTrack));
                         break;
                     case 'VOXEL_UPDATE':
-                        setVoxels(message.payload);
+                        store.setVoxels(message.payload);
                         break;
                     case 'RAY_UPDATE':
-                        setRays(message.payload);
+                        store.setRays(message.payload);
                         break;
                     case 'NODE_UPDATE':
                         // Payload may be an array of NodeHealth or a single update.
                         if (Array.isArray(message.payload)) {
-                            message.payload.forEach((node: NodeHealth) => updateNode(enrichNode(node)));
+                            message.payload.forEach((node: NodeHealth) => store.updateNode(enrichNode(node)));
                         } else {
-                            updateNode(enrichNode(message.payload));
+                            store.updateNode(enrichNode(message.payload));
                         }
                         break;
                     case 'SYSTEM_STATUS':
-                        updateSystemStatus(message.payload);
+                        store.updateSystemStatus(message.payload);
+                        // Per-node calibration status rides along in the status
+                        // payload (P1.5); surface it for the sensor list.
+                        if (message.payload && message.payload.calibration) {
+                            store.setCalibration(message.payload.calibration);
+                        }
                         break;
                     case 'CLUSTER_UPDATE': {
                         const payload = message.payload || {};
-                        if (payload.clusters) setClusters(payload.clusters);
-                        if (payload.pending_nodes) setPendingNodes(payload.pending_nodes);
+                        if (payload.clusters) store.setClusters(payload.clusters);
+                        if (payload.pending_nodes) store.setPendingNodes(payload.pending_nodes);
                         break;
                     }
                     default:
@@ -139,13 +128,73 @@ export function useWebSocket(url: string, enabled: boolean = true) {
             }
         };
 
+        const scheduleReconnect = () => {
+            if (cancelled || closedByUsRef.current) return;
+            // Exponential backoff, capped, so a backend that is down does not get
+            // hammered but the UI still recovers automatically when it returns.
+            const delay = Math.min(
+                RECONNECT_MAX_MS,
+                RECONNECT_BASE_MS * 2 ** attemptsRef.current
+            );
+            attemptsRef.current += 1;
+            setReconnectAttempt(attemptsRef.current);
+            console.log(`[WebSocket] Reconnecting in ${delay} ms...`);
+            reconnectTimerRef.current = setTimeout(connect, delay);
+        };
+
+        const connect = () => {
+            if (cancelled) return;
+            console.log(`[WebSocket] Connecting to ${url}...`);
+            const ws = new WebSocket(url);
+            wsRef.current = ws;
+
+            ws.onopen = () => {
+                console.log('[WebSocket] Connected');
+                attemptsRef.current = 0;
+                setReconnectAttempt(0);
+                setIsConnected(true);
+                // Re-subscribe to the active room after a reconnect, then flush
+                // any commands buffered while the socket was down.
+                const active = useAppStore.getState().activeClusterId;
+                if (active) {
+                    ws.send(JSON.stringify({ type: 'SUBSCRIBE_CLUSTER', payload: { cluster_id: active } }));
+                }
+                const queued = sendQueueRef.current;
+                sendQueueRef.current = [];
+                queued.forEach(m => ws.send(m));
+            };
+
+            ws.onclose = () => {
+                setIsConnected(false);
+                if (!closedByUsRef.current) {
+                    console.log('[WebSocket] Disconnected; will retry');
+                    scheduleReconnect();
+                }
+            };
+
+            ws.onerror = () => {
+                // onclose fires after onerror and owns the reconnect; just close.
+                ws.close();
+            };
+
+            ws.onmessage = dispatchMessage;
+        };
+
+        connect();
+
         return () => {
-            if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+            cancelled = true;
+            closedByUsRef.current = true;
+            if (reconnectTimerRef.current) {
+                clearTimeout(reconnectTimerRef.current);
+                reconnectTimerRef.current = null;
+            }
+            const ws = wsRef.current;
+            if (ws && (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING)) {
                 ws.close();
             }
         };
-    }, [url, enabled, setTracks, setVoxels, setRays, updateNode, updateSystemStatus,
-        setClusters, setPendingNodes]);
+    }, [url, enabled]);
 
     // Subscribe to the active cluster's room whenever it changes (P3.5).
     useEffect(() => {
@@ -154,7 +203,7 @@ export function useWebSocket(url: string, enabled: boolean = true) {
         }
     }, [enabled, isConnected, activeClusterId, sendCommand]);
 
-    return { isConnected, sendCommand };
+    return { isConnected, sendCommand, reconnectAttempt };
 }
 
 export function useMockData(enabled: boolean = true) {
@@ -201,13 +250,36 @@ export function useMockData(enabled: boolean = true) {
                 last_seen: Date.now() / 1000,
                 hit_count: 10,
                 confidence: 0.9,
-                predicted_next: [0, 0, 100]
+                predicted_next: [0, 0, 100],
+                // Mirrors the server's fused-angular-size estimate so sim mode
+                // exercises the Est. Size display (drone-to-aircraft scale).
+                physical_size: 1.5 + i * 2.5
             };
         }
 
+        let tick = 0;
         const interval = setInterval(() => {
             const now = Date.now() / 1000;
             const newTracks: Track[] = [];
+
+            // Refresh sensor heartbeats ~1 Hz. Without this the nodes were
+            // registered once with a fixed last_seen and the sensor list
+            // (correctly) flagged them all STALE after 10 s of sim time.
+            if (tick % 30 === 0) {
+                SENSORS.forEach(sensor => {
+                    updateNode(enrichNode({
+                        node_id: sensor.id,
+                        status: NodeHealthStatus.HEALTHY,
+                        last_seen: now,
+                        fps: 58 + Math.random() * 4,
+                        cpu_usage: 30 + Math.random() * 10,
+                        temp_c: 44 + Math.random() * 3,
+                        ip_address: "10.0.0.x",
+                        location: sensor.pos
+                    }));
+                });
+            }
+            tick++;
 
             // Update Tracks (Target Simulation)
             for (let i = 0; i < trackCount; i++) {

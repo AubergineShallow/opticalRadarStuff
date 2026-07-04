@@ -1,4 +1,3 @@
-
 // main.cpp - ESP32-CAM optical tracking edge node.
 //
 // Pipeline (mirrors the RPi LoRa node):

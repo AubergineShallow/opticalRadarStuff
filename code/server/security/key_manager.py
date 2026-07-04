@@ -1,5 +1,3 @@
-
-
 """
 key_manager.py
 PURPOSE: Manage shared secrets for authentication across the system.

@@ -1,5 +1,3 @@
-
-
 """
 lora_gateway.py
 PURPOSE: Server-side receiver ("gateway") for the compressed LoRa / Meshtastic

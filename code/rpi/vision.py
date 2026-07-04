@@ -1,5 +1,3 @@
-
-
 """
 vision.py
 PURPOSE: Camera capture and motion detection for Raspberry Pi.

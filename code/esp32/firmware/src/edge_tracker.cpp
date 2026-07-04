@@ -1,4 +1,3 @@
-
 // edge_tracker.cpp - see edge_tracker.h
 #include "edge_tracker.h"
 #include <math.h>

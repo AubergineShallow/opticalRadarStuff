@@ -1,5 +1,3 @@
-
-
 """
 kalman_filter.py
 PURPOSE: State estimation for tracked objects using constant velocity model.

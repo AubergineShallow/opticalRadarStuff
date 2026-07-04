@@ -1,5 +1,3 @@
-
-
 """
 quaternion.py
 PURPOSE: Math for describing rotations in 3D space.

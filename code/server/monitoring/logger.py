@@ -1,5 +1,3 @@
-
-
 """
 logger.py
 PURPOSE: Structured logging for the system.

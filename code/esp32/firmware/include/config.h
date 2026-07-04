@@ -1,4 +1,3 @@
-
 // config.h - Compile-time configuration for the ESP32-CAM optical node.
 //
 // PIN BUDGET (AI-Thinker ESP32-CAM): the OV2640 + PSRAM claim most GPIOs. With

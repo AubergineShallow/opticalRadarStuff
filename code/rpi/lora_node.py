@@ -1,5 +1,3 @@
-
-
 """
 lora_node.py
 PURPOSE: Main runner for a Raspberry Pi edge node that reports over LoRa /

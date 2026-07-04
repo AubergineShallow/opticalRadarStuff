@@ -1,5 +1,3 @@
-
-
 import { NodeHealthStatus } from "./types";
 
 export const UI_CONFIG = {

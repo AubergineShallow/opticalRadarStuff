@@ -1,4 +1,3 @@
-
 # LoRa / Meshtastic Setup
 
 This system can ingest edge-node detections over **LoRa** in addition to the

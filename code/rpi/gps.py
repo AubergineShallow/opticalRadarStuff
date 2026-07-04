@@ -1,5 +1,3 @@
-
-
 """
 gps.py
 PURPOSE: Read GPS data from GPS module.

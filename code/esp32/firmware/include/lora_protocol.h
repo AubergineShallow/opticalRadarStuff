@@ -1,4 +1,3 @@
-
 // lora_protocol.h - Byte-exact mirror of code/common/lora_protocol.py.
 //
 // CRITICAL: these packers must produce the EXACT bytes the Python

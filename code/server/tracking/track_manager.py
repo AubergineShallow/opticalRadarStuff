@@ -1,5 +1,3 @@
-
-
 """
 track_manager.py
 PURPOSE: Manage track lifecycle (creation, confirmation, deletion).
@@ -12,6 +10,11 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 
 from .kalman_filter import KalmanFilter, KalmanState
+
+# EMA blend for per-detection physical-size samples. Size measurements are
+# noisy (bounding-box jitter at the edge node, range error at the server), so
+# smooth them; 0.2 reaches ~90% of a step change in ~10 hits at 30 Hz.
+SIZE_EMA_ALPHA = 0.2
 
 
 class TrackState(IntEnum):
@@ -41,6 +44,9 @@ class Track:
     # Metadata
     class_id: int = 0
     confidence: float = 0.0
+    # EMA-smoothed physical size estimate (metres), fused from the angular
+    # sizes reported by the sensors that see this track. 0.0 = no estimate yet.
+    physical_size: float = 0.0
     
     @property
     def position(self) -> np.ndarray:
@@ -127,7 +133,8 @@ class TrackManager:
         position: np.ndarray,
         class_id: int = 0,
         confidence: float = 1.0,
-        measurement_covariance: Optional[np.ndarray] = None
+        measurement_covariance: Optional[np.ndarray] = None,
+        size_estimate: Optional[float] = None
     ) -> Track:
         """
         Create new tentative track.
@@ -138,6 +145,8 @@ class TrackManager:
             confidence: Detection confidence
             measurement_covariance: Optional 3x3 positional covariance for the
                 seeding detection (triangulation geometry). Seeds initial P.
+            size_estimate: Optional physical size (metres) of the seeding
+                detection; seeds the track's smoothed physical_size.
 
         Returns:
             New track
@@ -159,7 +168,8 @@ class TrackManager:
             created_at=now,
             last_update=now,
             class_id=class_id,
-            confidence=confidence
+            confidence=confidence,
+            physical_size=float(size_estimate) if size_estimate and size_estimate > 0 else 0.0
         )
         
         self._tracks[self._next_id] = track
@@ -174,18 +184,21 @@ class TrackManager:
         dt: float,
         class_id: Optional[int] = None,
         confidence: Optional[float] = None,
-        measurement_covariance: Optional[np.ndarray] = None
+        measurement_covariance: Optional[np.ndarray] = None,
+        size_estimate: Optional[float] = None
     ) -> Optional[Track]:
         """
         Update track with new detection.
-        
+
         Args:
             track_id: Track ID
             measurement: Detection position [x, y, z]
             dt: Time since last update
             class_id: Optional class update
             confidence: Optional confidence update
-        
+            size_estimate: Optional physical size (metres) of this detection;
+                EMA-blended into track.physical_size
+
         Returns:
             Updated track or None
         """
@@ -211,7 +224,13 @@ class TrackManager:
             track.class_id = class_id
         if confidence is not None:
             track.confidence = confidence
-        
+        if size_estimate is not None and size_estimate > 0:
+            if track.physical_size <= 0:
+                track.physical_size = float(size_estimate)  # first sample seeds
+            else:
+                track.physical_size = (SIZE_EMA_ALPHA * float(size_estimate)
+                                       + (1.0 - SIZE_EMA_ALPHA) * track.physical_size)
+
         # State transitions
         if track.state == TrackState.TENTATIVE:
             if track.hits >= self.min_hits:

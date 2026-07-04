@@ -1,5 +1,3 @@
-
-
 """
 server_main.py
 PURPOSE: Main server orchestrator for the optical radar system.
@@ -13,6 +11,7 @@ import signal
 import sys
 import os
 import json
+import math
 from typing import Optional, List, Tuple, Dict
 import numpy as np
 
@@ -196,12 +195,21 @@ class OpticalRadarServer:
         # new node_ids are capped once the ceiling is hit.
         net_cfg_nodes = getattr(self.config, 'network', None)
         self._max_nodes = getattr(net_cfg_nodes, 'max_nodes', 256) if net_cfg_nodes else 256
+        # Cap on motion vectors consumed per telemetry datagram (bounded per-packet
+        # ray-building/octree cost). See NetworkConfig.max_vectors_per_packet.
+        self._max_vectors_per_packet = getattr(
+            net_cfg_nodes, 'max_vectors_per_packet', 512) if net_cfg_nodes else 512
         # measurement_covariance() tuning: large along-ray (depth) sigma since a
         # single bearing barely constrains range; cross-range floor tied to the
         # voxel resolution (quantisation scale).
         grid_cfg = getattr(self.config, 'grid', None)
         self._uncert_sigma_range = 100.0
         self._uncert_min_cross_range = getattr(grid_cfg, 'resolution_m', 1.0) if grid_cfg else 1.0
+        # Physical-size estimation tuning: ignore rays farther than this from
+        # the fused position (angular size at long range is all noise), and use
+        # the grid resolution as the ray-to-detection matching slack.
+        self._size_max_range = 500.0
+        self._size_match_slack_m = 2.0 * self._uncert_min_cross_range
 
         # Calibration feedback loop (P1.5). Calibrator takes solver parameters
         # (not a Config object) plus a validator that gates corrections.
@@ -310,24 +318,53 @@ class OpticalRadarServer:
             return None
 
     def _handle_create_cluster(self, client_id: str, payload: dict):
-        """WebSocket handler for CREATE_CLUSTER command"""
+        """WebSocket handler for CREATE_CLUSTER command.
+
+        The command arrives from an unauthenticated UI client, so it is treated
+        as untrusted: the cluster_id must be a plain string, and creation is
+        subject to ClusterManager's max_clusters cap (create_cluster returns None
+        when the cap is hit) so a flood cannot exhaust memory.
+        """
         cluster_id = payload.get('cluster_id')
-        if cluster_id:
-            self.cluster_manager.create_cluster(cluster_id)
-            self.logger.info("cluster", f"Created new cluster: {cluster_id}")
-            self._broadcast_system_status()
+        if not isinstance(cluster_id, str) or not cluster_id:
+            return
+        cluster = self.cluster_manager.create_cluster(cluster_id)
+        if cluster is None:
+            self.logger.warning(
+                "cluster",
+                f"Refused CREATE_CLUSTER {cluster_id}: cluster cap "
+                f"({self.cluster_manager.max_clusters}) reached")
+            return
+        self.logger.info("cluster", f"Created new cluster: {cluster_id}")
+        self._broadcast_system_status()
 
     def _handle_assign_node(self, client_id: str, payload: dict):
-        """WebSocket handler for ASSIGN_NODE command"""
+        """WebSocket handler for ASSIGN_NODE command.
+
+        Only nodes the server has actually heard from (already assigned, pending,
+        or with known optics) may be assigned. Without this guard an untrusted
+        client could inject unlimited never-seen node_ids straight into
+        node_assignments, growing it without bound.
+        """
         node_id = payload.get('node_id')
         cluster_id = payload.get('cluster_id')
-        if node_id and cluster_id:
-            success = self.cluster_manager.assign_node(node_id, cluster_id)
-            if success:
-                self.logger.info("cluster", f"Assigned node {node_id} to cluster {cluster_id}")
-                self._broadcast_system_status()
-            else:
-                self.logger.warning("cluster", f"Failed to assign node {node_id} to cluster {cluster_id}")
+        if not isinstance(node_id, str) or not isinstance(cluster_id, str):
+            return
+        if not (node_id or cluster_id):
+            return
+        known = (node_id in self.cluster_manager.node_assignments
+                 or node_id in self.cluster_manager.pending_nodes
+                 or node_id in self._node_optics)
+        if not known:
+            self.logger.warning(
+                "cluster", f"Refused ASSIGN_NODE for unknown node {node_id}")
+            return
+        success = self.cluster_manager.assign_node(node_id, cluster_id)
+        if success:
+            self.logger.info("cluster", f"Assigned node {node_id} to cluster {cluster_id}")
+            self._broadcast_system_status()
+        else:
+            self.logger.warning("cluster", f"Failed to assign node {node_id} to cluster {cluster_id}")
 
     def _setup_signal_handlers(self):
         signal.signal(signal.SIGINT, self._handle_shutdown)
@@ -479,18 +516,60 @@ class OpticalRadarServer:
         file-provisioned optics, falling back to the default spec."""
         return self._node_optics.get(node_id, self._default_optics).sigma_theta_rad
 
+    def _estimate_physical_size(self, position, rays) -> Optional[float]:
+        """Fuse per-ray angular sizes into one physical-size sample (metres).
+
+        A bearing-only sensor can't size an object, but once the voxel grid has
+        triangulated a 3D position, each ray that (a) reported an angular size
+        and (b) actually points at that position gives an independent estimate:
+        size = 2 * range * tan(theta/2). The median over contributing sensors
+        rejects the odd bad bounding box. Returns None when no ray contributed
+        (the track then keeps its previous smoothed estimate).
+        """
+        sizes = []
+        for ray in rays:
+            theta_deg = getattr(ray, 'angular_size', 0.0)
+            # >= 90 degrees is a target filling half the sky — a detector
+            # artefact, and tan(theta/2) explodes towards 180. Reject.
+            if theta_deg <= 0.0 or theta_deg >= 90.0:
+                continue
+            v = position - ray.origin
+            rho = float(np.linalg.norm(v))
+            if rho <= 1e-6 or rho > self._size_max_range:
+                continue
+            along = float(np.dot(v, ray.direction))
+            if along <= 0.0:
+                continue  # detection is behind this camera
+            # Cross-range (perpendicular) miss distance of the ray vs the fused
+            # position: the ray "sees" this detection if it passes within the
+            # target's own angular radius plus a voxel-quantisation slack.
+            perp = float(np.linalg.norm(v - along * ray.direction))
+            target_radius = rho * math.tan(math.radians(theta_deg) / 2.0)
+            if perp > target_radius + self._size_match_slack_m:
+                continue
+            sizes.append(2.0 * target_radius)
+        if not sizes:
+            return None
+        return float(np.median(sizes))
+
     def _build_detections(self, cluster, centroids) -> List['Detection']:
         """Wrap voxel-cluster centroids as Detection objects, attaching a 3x3
         positional measurement covariance derived from the optics of the nodes
-        assigned to this cluster (see server.uncertainty). Falls back to no
-        covariance (tracker uses its default isotropic R) when no node position
-        is known yet."""
+        assigned to this cluster (see server.uncertainty), plus a physical-size
+        sample fused from this frame's rays (see _estimate_physical_size).
+        Falls back to no covariance (tracker uses its default isotropic R) when
+        no node position is known yet."""
         rb = cluster.ray_builder
         cams = []
         for cam_id in rb.get_all_cameras():
             pos = rb.get_camera_position(cam_id)
             if pos is not None:
                 cams.append((pos, self._node_sigma_theta(cam_id)))
+
+        # This frame's rays are still buffered for the RAY_UPDATE broadcast at
+        # this point in the loop (popped later), so size estimation reuses them
+        # without any extra bookkeeping.
+        frame_rays = self._pending_rays.get(cluster.cluster_id, [])
 
         det_objs = []
         for c in centroids:
@@ -500,7 +579,8 @@ class OpticalRadarServer:
                 sigma_range=self._uncert_sigma_range,
                 min_cross_range=self._uncert_min_cross_range,
             ) if cams else None
-            det_objs.append(Detection(position=pos, covariance=R))
+            size = self._estimate_physical_size(pos, frame_rays) if frame_rays else None
+            det_objs.append(Detection(position=pos, covariance=R, size_estimate=size))
         return det_objs
 
     def _process_packet(self, packet, address, trusted: bool = False):
@@ -568,13 +648,24 @@ class OpticalRadarServer:
         # camera position) from it poisons the covariance and the UI. Health
         # and node-status reporting above still happen either way.
         if packet.health_flags & 0x01:
+            # Bound per-packet work: a single datagram can legally carry
+            # thousands of vectors, but each becomes a ray + full octree
+            # traversal. Process at most _max_vectors_per_packet and drop the
+            # rest so one node (buggy or hostile) can't monopolise the loop.
+            vectors = packet.vectors
+            if len(vectors) > self._max_vectors_per_packet:
+                self.logger.warning(
+                    "network",
+                    f"Node {node_id} sent {len(vectors)} vectors; capping at "
+                    f"{self._max_vectors_per_packet}")
+                vectors = vectors[:self._max_vectors_per_packet]
             rays = cluster.ray_builder.build_rays_from_packet(
                 node_id,
                 packet.latitude,
                 packet.longitude,
                 packet.altitude,
                 packet.orientation,
-                packet.vectors
+                vectors
             )
         else:
             rays = []
@@ -762,6 +853,9 @@ class OpticalRadarServer:
             # optics-derived measurement covariance (P-optics).
             det_objs = self._build_detections(cluster, detections)
             cluster.tracker.update(det_objs)
+        # Mirror _run_loop: a frame's rays contribute (to size estimates) once,
+        # then the buffer is dropped so it can't grow across frames.
+        self._pending_rays.clear()
         self.frame_count += 1
 
     # ------------------------------------------------------------------ #

@@ -1,5 +1,3 @@
-
-
 """
 node_health.py
 PURPOSE: Track health status of camera nodes.

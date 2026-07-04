@@ -1,8 +1,16 @@
-
-
 import React, { useState } from 'react';
 import { Target, AlertCircle, ChevronUp, ChevronDown } from 'lucide-react';
-import { Track } from '../../types';
+import { Track, TrackState } from '../../types';
+import { useAppStore } from '../../store';
+
+// Lifecycle state -> dot colour, matching TrackDetail's state colours so the
+// list and the detail card tell the same story at a glance.
+const STATE_DOT: Record<number, { dot: string; label: string }> = {
+    [TrackState.TENTATIVE]: { dot: 'bg-yellow-500', label: 'Tentative' },
+    [TrackState.CONFIRMED]: { dot: 'bg-green-500', label: 'Confirmed' },
+    [TrackState.LOST]: { dot: 'bg-orange-500', label: 'Lost' },
+    [TrackState.DELETED]: { dot: 'bg-red-500', label: 'Deleted' },
+};
 
 interface TargetListProps {
     tracks: Record<string, Track>;
@@ -13,6 +21,7 @@ interface TargetListProps {
 export function TargetList({ tracks, onSelectTrack, selectedTrackId }: TargetListProps) {
     const [isMinimized, setIsMinimized] = useState(false);
     const trackList = Object.values(tracks);
+    const requestFocus = useAppStore(s => s.requestFocus);
 
     return (
         <div className="bg-black/80 border border-amber-500/30 p-2 rounded w-96 backdrop-blur pointer-events-auto flex flex-col gap-2 shadow-[0_0_15px_rgba(255,165,0,0.1)] transition-all duration-200">
@@ -73,9 +82,14 @@ export function TargetList({ tracks, onSelectTrack, selectedTrackId }: TargetLis
                                                     ${isSelected ? 'bg-amber-500/20' : 'hover:bg-white/10'}
                                                 `}
                                                 onClick={() => onSelectTrack?.(track.track_id.toString())}
+                                                onDoubleClick={() => display && requestFocus(display.lat, display.lon)}
+                                                title="Click to select · double-click to center map"
                                             >
                                                 <td className="p-2 text-amber-400 font-bold group-hover:text-amber-300">
-                                                    T-{track.track_id}
+                                                    <span className="flex items-center gap-2" title={STATE_DOT[track.state]?.label ?? 'Unknown'}>
+                                                        <span className={`w-2 h-2 rounded-full shrink-0 ${STATE_DOT[track.state]?.dot ?? 'bg-gray-500'} ${track.state === TrackState.TENTATIVE ? 'animate-pulse' : ''}`} />
+                                                        T-{track.track_id}
+                                                    </span>
                                                 </td>
                                                 <td className="p-2 text-right text-cyan-300">
                                                     {display?.speed_ms.toFixed(1) ?? '—'} <span className="text-gray-600 text-[9px]">m/s</span>

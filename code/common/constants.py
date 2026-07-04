@@ -1,5 +1,3 @@
-
-
 """
 constants.py
 PURPOSE: Stores fixed settings for the system.

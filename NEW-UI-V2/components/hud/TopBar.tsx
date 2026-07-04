@@ -1,5 +1,3 @@
-
-
 import React, { useState } from 'react';
 import { ClusterInfo } from '../../types';
 import { useAppStore } from '../../store';
@@ -47,8 +45,10 @@ export function TopBar({ time, clusters = {}, activeClusterId, sendCommand }: To
                         }}
                     >
                         <option value="" disabled>Select Domain</option>
-                        {Object.keys(clusters || {}).map(id => (
-                            <option key={id} value={id}>{id}</option>
+                        {Object.entries(clusters || {}).map(([id, info]) => (
+                            <option key={id} value={id}>
+                                {id} · {info.node_ids?.length ?? 0} nodes
+                            </option>
                         ))}
                     </select>
 
