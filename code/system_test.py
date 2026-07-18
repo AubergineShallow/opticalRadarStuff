@@ -123,6 +123,43 @@ def test_imports():
     check("simulation.sim_utils", lambda: __import__("simulation.sim_utils"))
 
 
+def test_geo():
+    """Test geographical math utilities."""
+    print("\n=== Phase 1b: Geo Math ===")
+
+    from math_utils.geo import haversine_distance
+    import math
+
+    def test_haversine():
+        R = 6371000
+
+        # 1. Same point
+        dist = haversine_distance(1.0, 1.0, 1.0, 1.0)
+        assert abs(dist - 0.0) < 1e-5, f"Expected 0.0, got {dist}"
+
+        # 2. Equator (1 degree of longitude)
+        # 1 degree in radians is pi / 180
+        # Expected distance = R * (pi / 180)
+        dist = haversine_distance(0.0, 0.0, 0.0, 1.0)
+        expected = R * (math.pi / 180)
+        assert abs(dist - expected) < 1.0, f"Expected {expected}, got {dist}"
+
+        # 3. North pole to South pole
+        # Expected distance = R * pi
+        dist = haversine_distance(90.0, 0.0, -90.0, 0.0)
+        expected = R * math.pi
+        assert abs(dist - expected) < 1.0, f"Expected {expected}, got {dist}"
+
+        # 4. Known cities: NY (40.7128 N, 74.0060 W) to London (51.5074 N, 0.1278 W)
+        # distance ~ 5570 km
+        dist = haversine_distance(40.7128, -74.0060, 51.5074, -0.1278)
+        assert 5560000 < dist < 5580000, f"Distance NY to London should be ~5570km, got {dist}"
+
+        return True
+
+    check("haversine_distance calculation", test_haversine)
+
+
 def test_protocol():
     """Test protocol pack/unpack round-trip."""
     print("\n=== Phase 2: Protocol Round-Trip ===")
@@ -1505,6 +1542,7 @@ def main():
     test_geo()
     test_quaternion()
     test_imports()
+    test_geo()
     test_protocol()
     test_config()
     test_voxel_grid()
