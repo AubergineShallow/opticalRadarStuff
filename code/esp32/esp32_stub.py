@@ -11,7 +11,7 @@ This stub is for simulation and server-side coordination.
 import time
 import socket
 import struct
-from typing import Optional, Tuple
+from typing import Optional
 from dataclasses import dataclass
 
 
